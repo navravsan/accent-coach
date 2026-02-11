@@ -195,7 +195,8 @@ export default function TalkScreen() {
         const chunkPromise = (async () => {
           try {
             const base64 = await getAudioBase64(uri);
-            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64 });
+            const articleText = article ? `${article.title}\n${article.body}` : "";
+            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64, referenceText: articleText });
             const data = await response.json();
             if (data.words && data.words.length > 0) {
               chunkResultsRef.current.push({
@@ -340,7 +341,8 @@ export default function TalkScreen() {
         const lastChunk = (async () => {
           try {
             const base64 = await getAudioBase64(uri);
-            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64 });
+            const articleText = article ? `${article.title}\n${article.body}` : "";
+            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64, referenceText: articleText });
             const data = await response.json();
             if (data.words && data.words.length > 0) {
               chunkResultsRef.current.push({
