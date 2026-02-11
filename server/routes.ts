@@ -191,6 +191,55 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
     }
   });
 
+  app.get("/api/reading-article", async (_req: Request, res: Response) => {
+    try {
+      const topics = [
+        "agile product development",
+        "user research methods",
+        "product-market fit",
+        "sprint planning best practices",
+        "building an MVP",
+        "customer feedback loops",
+        "feature prioritization frameworks",
+        "cross-functional team collaboration",
+        "product roadmap strategies",
+        "A/B testing for product decisions",
+        "OKRs for product teams",
+        "design thinking in product management",
+        "technical debt management",
+        "stakeholder communication",
+        "growth metrics and KPIs",
+      ];
+      const topic = topics[Math.floor(Math.random() * topics.length)];
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Write a short, engaging article about a tech product management topic. The article should be exactly 15-20 lines long (each line being a natural sentence). Write in clear, professional English that is great for reading aloud to practice pronunciation. Use varied vocabulary with some challenging words. Do NOT use markdown formatting, bullet points, or headers. Just write flowing paragraphs. Include a one-line title at the very start.`,
+          },
+          {
+            role: "user",
+            content: `Write a short article about: ${topic}`,
+          },
+        ],
+        max_tokens: 600,
+        temperature: 0.9,
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+      const lines = content.split("\n").filter((l: string) => l.trim().length > 0);
+      const title = lines[0] || topic;
+      const body = lines.slice(1).join("\n");
+
+      res.json({ title, body, topic });
+    } catch (error) {
+      console.error("Error generating article:", error);
+      res.status(500).json({ error: "Failed to generate article" });
+    }
+  });
+
   app.post("/api/tts", async (req: Request, res: Response) => {
     try {
       const { word } = req.body;

@@ -24,7 +24,7 @@ import Animated, {
   cancelAnimation,
 } from "react-native-reanimated";
 import Colors from "@/constants/colors";
-import { apiRequest } from "@/lib/query-client";
+import { apiRequest, getApiUrl } from "@/lib/query-client";
 import {
   addMispronouncedWords,
   addSession,
@@ -111,6 +111,9 @@ export default function TalkScreen() {
   const [permission, setPermission] = useState<boolean | null>(null);
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [analyzeTotal, setAnalyzeTotal] = useState(1);
+  const [article, setArticle] = useState<{ title: string; body: string } | null>(null);
+  const [articleLoading, setArticleLoading] = useState(false);
+  const [articleExpanded, setArticleExpanded] = useState(false);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -128,6 +131,7 @@ export default function TalkScreen() {
 
   useEffect(() => {
     checkPermission();
+    fetchArticle();
   }, []);
 
   const checkPermission = async () => {
@@ -138,6 +142,24 @@ export default function TalkScreen() {
   const requestPermission = async () => {
     const { status } = await Audio.requestPermissionsAsync();
     setPermission(status === "granted");
+  };
+
+  const fetchArticle = async () => {
+    try {
+      setArticleLoading(true);
+      setArticleExpanded(false);
+      const baseUrl = getApiUrl();
+      const url = new URL("/api/reading-article", baseUrl);
+      const resp = await globalThis.fetch(url.toString());
+      if (resp.ok) {
+        const data = await resp.json();
+        setArticle({ title: data.title, body: data.body });
+      }
+    } catch (err) {
+      console.error("Failed to fetch article:", err);
+    } finally {
+      setArticleLoading(false);
+    }
   };
 
   const getAudioBase64 = async (uri: string): Promise<string> => {
@@ -564,8 +586,8 @@ export default function TalkScreen() {
         <View style={{ width: 28 }} />
       </View>
 
-      <View style={styles.centerContent}>
-        {state === "analyzing" ? (
+      {state === "analyzing" ? (
+        <View style={styles.centerContent}>
           <View style={styles.analyzingContainer}>
             <View style={styles.progressCircleOuter}>
               <Text style={styles.progressPercent}>
@@ -587,8 +609,17 @@ export default function TalkScreen() {
                 : "Finalizing results..."}
             </Text>
           </View>
-        ) : (
-          <>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.idleContent,
+            { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) + 20 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.recorderSection}>
             <Text style={styles.timerText}>
               {state === "recording" ? formatTime(remaining) : formatTime(selectedMinutes * 60)}
             </Text>
@@ -644,12 +675,66 @@ export default function TalkScreen() {
 
             <Text style={styles.hintText}>
               {state === "recording"
-                ? "Speak naturally about any topic"
+                ? "Read the article below aloud, or speak freely"
                 : "Choose duration, then tap to record"}
             </Text>
-          </>
-        )}
-      </View>
+          </View>
+
+          {state === "idle" && (
+            <View style={styles.articleSection}>
+              <View style={styles.articleHeader}>
+                <View style={styles.articleHeaderLeft}>
+                  <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
+                  <Text style={styles.articleHeaderLabel}>Reading Practice</Text>
+                </View>
+                <Pressable
+                  onPress={fetchArticle}
+                  hitSlop={12}
+                  style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+                >
+                  {articleLoading ? (
+                    <ActivityIndicator size="small" color={Colors.dark.textMuted} />
+                  ) : (
+                    <Ionicons name="refresh" size={18} color={Colors.dark.textMuted} />
+                  )}
+                </Pressable>
+              </View>
+
+              {article ? (
+                <Pressable
+                  onPress={() => setArticleExpanded(!articleExpanded)}
+                  style={styles.articleCard}
+                >
+                  <Text style={styles.articleTitle}>{article.title}</Text>
+                  <Text
+                    style={styles.articleBody}
+                    numberOfLines={articleExpanded ? undefined : 6}
+                  >
+                    {article.body}
+                  </Text>
+                  <Text style={styles.articleExpandHint}>
+                    {articleExpanded ? "Tap to collapse" : "Tap to read full article"}
+                  </Text>
+                </Pressable>
+              ) : articleLoading ? (
+                <View style={styles.articleCard}>
+                  <ActivityIndicator size="small" color={Colors.dark.accent} />
+                  <Text style={styles.articleLoadingText}>Loading article...</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+
+          {state === "recording" && article && (
+            <View style={styles.articleSection}>
+              <View style={styles.articleCard}>
+                <Text style={styles.articleTitle}>{article.title}</Text>
+                <Text style={styles.articleBody}>{article.body}</Text>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -676,6 +761,13 @@ const styles = StyleSheet.create({
     justifyContent: "center" as const,
     alignItems: "center" as const,
     paddingHorizontal: 24,
+  },
+  idleContent: {
+    paddingHorizontal: 24,
+  },
+  recorderSection: {
+    alignItems: "center" as const,
+    paddingTop: 20,
   },
   timerText: {
     fontFamily: "Inter_700Bold",
@@ -947,5 +1039,57 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     fontSize: 16,
     color: "#fff",
+  },
+  articleSection: {
+    marginTop: 28,
+  },
+  articleHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    marginBottom: 12,
+  },
+  articleHeaderLeft: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+  },
+  articleHeaderLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: Colors.dark.accent,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  articleCard: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 16,
+    padding: 18,
+    gap: 10,
+  },
+  articleTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 17,
+    color: Colors.dark.text,
+    lineHeight: 24,
+  },
+  articleBody: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 15,
+    color: Colors.dark.textSecondary,
+    lineHeight: 24,
+  },
+  articleExpandHint: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    color: Colors.dark.accent,
+    textAlign: "center" as const,
+    marginTop: 4,
+  },
+  articleLoadingText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
+    textAlign: "center" as const,
   },
 });
