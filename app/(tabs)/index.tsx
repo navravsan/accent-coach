@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Animated, {
@@ -249,7 +249,7 @@ export default function TalkScreen() {
         });
       } else {
         base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: "base64" as any,
+          encoding: FileSystem.EncodingType.Base64,
         });
       }
 
