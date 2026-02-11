@@ -611,46 +611,52 @@ export default function TalkScreen() {
           </View>
         </View>
       ) : (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={[
-            styles.idleContent,
-            { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) + 20 },
-          ]}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.recorderSection}>
+        <View style={styles.mainContent}>
+          <View style={styles.controlsSection}>
             <Text style={styles.timerText}>
               {state === "recording" ? formatTime(remaining) : formatTime(selectedMinutes * 60)}
             </Text>
-            <Text style={styles.timerLabel}>
-              {state === "recording" ? "Recording..." : "Tap to start speaking"}
-            </Text>
 
             {state === "idle" && (
-              <View style={styles.durationPicker}>
-                {DURATION_OPTIONS.map((min) => (
-                  <Pressable
-                    key={min}
-                    style={[
-                      styles.durationOption,
-                      selectedMinutes === min && styles.durationOptionActive,
-                    ]}
-                    onPress={() => {
-                      setSelectedMinutes(min);
-                      Haptics.selectionAsync();
-                    }}
-                  >
-                    <Text
+              <>
+                <Text style={styles.timerLabel}>Tap to start speaking</Text>
+                <View style={styles.durationPicker}>
+                  {DURATION_OPTIONS.map((min) => (
+                    <Pressable
+                      key={min}
                       style={[
-                        styles.durationOptionText,
-                        selectedMinutes === min && styles.durationOptionTextActive,
+                        styles.durationOption,
+                        selectedMinutes === min && styles.durationOptionActive,
                       ]}
+                      onPress={() => {
+                        setSelectedMinutes(min);
+                        Haptics.selectionAsync();
+                      }}
                     >
-                      {min}m
-                    </Text>
-                  </Pressable>
-                ))}
+                      <Text
+                        style={[
+                          styles.durationOptionText,
+                          selectedMinutes === min && styles.durationOptionTextActive,
+                        ]}
+                      >
+                        {min}m
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            )}
+
+            {state === "recording" && (
+              <View style={styles.recordingTimerBar}>
+                <View style={styles.recordingTimerBarFill}>
+                  <View
+                    style={[
+                      styles.recordingTimerBarProgress,
+                      { width: `${Math.min((elapsed / maxDuration) * 100, 100)}%` as any },
+                    ]}
+                  />
+                </View>
               </View>
             )}
 
@@ -666,74 +672,83 @@ export default function TalkScreen() {
                 >
                   <Ionicons
                     name={state === "recording" ? "stop" : "mic"}
-                    size={40}
+                    size={36}
                     color="#fff"
                   />
                 </Pressable>
               </Animated.View>
             </View>
 
-            <Text style={styles.hintText}>
-              {state === "recording"
-                ? "Read the article below aloud, or speak freely"
-                : "Choose duration, then tap to record"}
-            </Text>
+            {state === "recording" && (
+              <Text style={styles.hintTextRecording}>
+                Read the article below aloud, or speak freely
+              </Text>
+            )}
           </View>
 
-          {state === "idle" && (
-            <View style={styles.articleSection}>
-              <View style={styles.articleHeader}>
-                <View style={styles.articleHeaderLeft}>
-                  <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
-                  <Text style={styles.articleHeaderLabel}>Reading Practice</Text>
-                </View>
-                <Pressable
-                  onPress={fetchArticle}
-                  hitSlop={12}
-                  style={({ pressed }) => [pressed && { opacity: 0.6 }]}
-                >
-                  {articleLoading ? (
-                    <ActivityIndicator size="small" color={Colors.dark.textMuted} />
-                  ) : (
-                    <Ionicons name="refresh" size={18} color={Colors.dark.textMuted} />
-                  )}
-                </Pressable>
-              </View>
-
-              {article ? (
-                <Pressable
-                  onPress={() => setArticleExpanded(!articleExpanded)}
-                  style={styles.articleCard}
-                >
-                  <Text style={styles.articleTitle}>{article.title}</Text>
-                  <Text
-                    style={styles.articleBody}
-                    numberOfLines={articleExpanded ? undefined : 6}
+          <ScrollView
+            style={styles.articleScrollArea}
+            contentContainerStyle={[
+              styles.articleScrollContent,
+              { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) + 16 },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {state === "idle" && (
+              <View style={styles.articleSection}>
+                <View style={styles.articleHeader}>
+                  <View style={styles.articleHeaderLeft}>
+                    <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
+                    <Text style={styles.articleHeaderLabel}>Reading Practice</Text>
+                  </View>
+                  <Pressable
+                    onPress={fetchArticle}
+                    hitSlop={12}
+                    style={({ pressed }) => [pressed && { opacity: 0.6 }]}
                   >
-                    {article.body}
-                  </Text>
-                  <Text style={styles.articleExpandHint}>
-                    {articleExpanded ? "Tap to collapse" : "Tap to read full article"}
-                  </Text>
-                </Pressable>
-              ) : articleLoading ? (
-                <View style={styles.articleCard}>
-                  <ActivityIndicator size="small" color={Colors.dark.accent} />
-                  <Text style={styles.articleLoadingText}>Loading article...</Text>
+                    {articleLoading ? (
+                      <ActivityIndicator size="small" color={Colors.dark.textMuted} />
+                    ) : (
+                      <Ionicons name="refresh" size={18} color={Colors.dark.textMuted} />
+                    )}
+                  </Pressable>
                 </View>
-              ) : null}
-            </View>
-          )}
 
-          {state === "recording" && article && (
-            <View style={styles.articleSection}>
-              <View style={styles.articleCard}>
-                <Text style={styles.articleTitle}>{article.title}</Text>
-                <Text style={styles.articleBody}>{article.body}</Text>
+                {article ? (
+                  <Pressable
+                    onPress={() => setArticleExpanded(!articleExpanded)}
+                    style={styles.articleCard}
+                  >
+                    <Text style={styles.articleTitle}>{article.title}</Text>
+                    <Text
+                      style={styles.articleBody}
+                      numberOfLines={articleExpanded ? undefined : 6}
+                    >
+                      {article.body}
+                    </Text>
+                    <Text style={styles.articleExpandHint}>
+                      {articleExpanded ? "Tap to collapse" : "Tap to read full article"}
+                    </Text>
+                  </Pressable>
+                ) : articleLoading ? (
+                  <View style={styles.articleCard}>
+                    <ActivityIndicator size="small" color={Colors.dark.accent} />
+                    <Text style={styles.articleLoadingText}>Loading article...</Text>
+                  </View>
+                ) : null}
               </View>
-            </View>
-          )}
-        </ScrollView>
+            )}
+
+            {state === "recording" && article && (
+              <View style={styles.articleSection}>
+                <View style={styles.articleCard}>
+                  <Text style={styles.articleTitle}>{article.title}</Text>
+                  <Text style={styles.articleBody}>{article.body}</Text>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -762,30 +777,62 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     paddingHorizontal: 24,
   },
-  idleContent: {
-    paddingHorizontal: 24,
+  mainContent: {
+    flex: 1,
   },
-  recorderSection: {
+  controlsSection: {
     alignItems: "center" as const,
-    paddingTop: 20,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  articleScrollArea: {
+    flex: 1,
+    maxHeight: "75%" as any,
+  },
+  articleScrollContent: {
+    paddingHorizontal: 24,
   },
   timerText: {
     fontFamily: "Inter_700Bold",
-    fontSize: 56,
+    fontSize: 48,
     color: Colors.dark.text,
     letterSpacing: 2,
   },
   timerLabel: {
     fontFamily: "Inter_500Medium",
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.dark.textSecondary,
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  recordingTimerBar: {
+    width: "80%" as any,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  recordingTimerBarFill: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.dark.surface,
+    overflow: "hidden" as const,
+  },
+  recordingTimerBarProgress: {
+    height: "100%" as any,
+    borderRadius: 2,
+    backgroundColor: Colors.dark.error,
+  },
+  hintTextRecording: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: Colors.dark.textMuted,
+    marginTop: 6,
+    textAlign: "center" as const,
   },
   durationPicker: {
     flexDirection: "row" as const,
     gap: 10,
-    marginBottom: 32,
+    marginBottom: 16,
   },
   durationOption: {
     width: 48,
@@ -810,23 +857,23 @@ const styles = StyleSheet.create({
     color: Colors.dark.accent,
   },
   micButtonContainer: {
-    width: 140,
-    height: 140,
+    width: 110,
+    height: 110,
     justifyContent: "center" as const,
     alignItems: "center" as const,
   },
   pulseRing: {
     position: "absolute" as const,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     borderWidth: 2,
     borderColor: Colors.dark.accent,
   },
   micButton: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: Colors.dark.accent,
     justifyContent: "center" as const,
     alignItems: "center" as const,
@@ -836,9 +883,9 @@ const styles = StyleSheet.create({
   },
   hintText: {
     fontFamily: "Inter_400Regular",
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.dark.textMuted,
-    marginTop: 40,
+    marginTop: 12,
     textAlign: "center" as const,
   },
   analyzingContainer: {
