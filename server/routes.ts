@@ -1,7 +1,98 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { openai, speechToText, textToSpeech, ensureCompatibleFormat } from "./replit_integrations/audio/client";
+import { openai, speechToText, textToSpeech, ensureCompatibleFormat, convertToWav } from "./replit_integrations/audio/client";
+import { assessPronunciation, assessWord as azureAssessWord } from "./azure-speech";
 import { Buffer } from "node:buffer";
+
+async function ensureWav16k(rawBuffer: Buffer): Promise<Buffer> {
+  const { buffer } = await ensureCompatibleFormat(rawBuffer);
+  return buffer;
+}
+
+async function enrichWordsWithTips(
+  words: Array<{ word: string; score: number; errorType: string }>
+): Promise<Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>> {
+  const needsTips = words.filter(w => w.word.length >= 4 && w.score < 85 && w.errorType !== "Omission");
+
+  if (needsTips.length === 0) {
+    return words
+      .filter(w => w.word.length >= 4 && w.errorType !== "Omission" && w.errorType !== "Insertion")
+      .map(w => ({
+        word: w.word,
+        score: w.score,
+        tip: "",
+        problemPart: "",
+        phonetic: "",
+      }));
+  }
+
+  const wordList = needsTips.map(w => `${w.word} (score: ${w.score})`).join(", ");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a North American English pronunciation coach. For each word with a low pronunciation score, provide:
+1. "phonetic": IPA transcription of correct North American pronunciation
+2. "problemPart": the specific syllable/letters likely mispronounced (lowercase)
+3. "tip": a brief, actionable pronunciation tip
+
+Respond with ONLY a JSON object (no markdown):
+{"words": [{"word": "example", "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable"}]}`,
+        },
+        {
+          role: "user",
+          content: `Provide pronunciation tips for these words that scored low: ${wordList}`,
+        },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    });
+
+    const raw = response.choices[0]?.message?.content || "";
+    const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    let tips: any = null;
+    try {
+      tips = JSON.parse(cleaned);
+    } catch {
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (m) try { tips = JSON.parse(m[0]); } catch {}
+    }
+
+    const tipMap = new Map<string, any>();
+    if (tips?.words) {
+      for (const t of tips.words) {
+        tipMap.set(t.word.toLowerCase(), t);
+      }
+    }
+
+    return words
+      .filter(w => w.word.length >= 4 && w.errorType !== "Omission" && w.errorType !== "Insertion")
+      .map(w => {
+        const tipData = tipMap.get(w.word.toLowerCase());
+        return {
+          word: w.word,
+          score: w.score,
+          tip: tipData?.tip || "",
+          problemPart: tipData?.problemPart || "",
+          phonetic: tipData?.phonetic || "",
+        };
+      });
+  } catch (err) {
+    console.error("Error enriching words with tips:", err);
+    return words
+      .filter(w => w.word.length >= 4 && w.errorType !== "Omission" && w.errorType !== "Insertion")
+      .map(w => ({
+        word: w.word,
+        score: w.score,
+        tip: "",
+        problemPart: "",
+        phonetic: "",
+      }));
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/analyze-speech", async (req: Request, res: Response) => {
@@ -12,9 +103,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      const wavBuffer = await ensureWav16k(rawBuffer);
 
-      const transcript = await speechToText(audioBuffer, inputFormat);
+      const transcript = await speechToText(wavBuffer, "wav");
 
       if (!transcript || transcript.trim().length === 0) {
         return res.json({
@@ -24,88 +115,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const words = transcript.replace(/[^\w\s'-]/g, "").split(/\s+/).filter(Boolean);
-      console.log(`Transcript has ${words.length} words, requesting assessment...`);
+      console.log(`[Azure] Assessing pronunciation for transcript (${transcript.split(/\s+/).length} words)...`);
 
-      const longWords = words.filter(w => w.length >= 4);
-      console.log(`Long words (4+ chars): ${longWords.length}`);
+      const azureResult = await assessPronunciation(wavBuffer, transcript);
+      console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
 
-      const assessmentResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a speech-language pathologist. Analyze pronunciation accuracy for a non-native English speaker's transcription.
+      const azureWords = azureResult.words.map(w => ({
+        word: w.word,
+        score: w.accuracyScore,
+        errorType: w.errorType,
+      }));
 
-ONLY score words with 4+ letters. Skip short words (the, a, is, it, and, to, in, on, of, for, etc).
+      const enrichedWords = await enrichWordsWithTips(azureWords);
 
-Score each word 0-100:
-- 90-100: Native-like
-- 70-89: Minor accent
-- 50-69: Noticeable accent  
-- 30-49: Significant issues
-- 0-29: Major problems
+      const overallScore = Math.round(azureResult.pronScore);
 
-For words below 85, add "problemPart": the specific syllable/letters being mispronounced (lowercase). Example: for "integration" with trouble on "gra", set problemPart to "gra".
-
-Also include "phonetic": the IPA phonetic transcription of how the word SHOULD be pronounced in North American English. Example: "integration" -> "/ˌɪntɪˈɡreɪʃən/"
-
-Respond with ONLY a JSON object (no markdown, no code blocks):
-{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": "", "phonetic": "/həˈloʊ/"}, {"word": "integration", "score": 62, "tip": "Soften the gra cluster", "problemPart": "gra", "phonetic": "/ˌɪntɪˈɡreɪʃən/"}]}`,
-          },
-          {
-            role: "user",
-            content: `Analyze this transcription. Score each word with 4+ letters:\n\n"${transcript}"`,
-          },
-        ],
-        max_tokens: 4096,
-        temperature: 0.3,
-      });
-
-      const rawContent = assessmentResponse.choices[0]?.message?.content || "";
-      console.log("Assessment raw response length:", rawContent.length);
-      console.log("Assessment first 300 chars:", rawContent.substring(0, 300));
-
-      let assessment: any = null;
-      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-
-      try {
-        assessment = JSON.parse(jsonStr);
-      } catch {
-        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            assessment = JSON.parse(jsonMatch[0]);
-          } catch {
-            console.error("Could not parse JSON from response");
-          }
-        }
-      }
-
-      if (!assessment || !assessment.words || !Array.isArray(assessment.words) || assessment.words.length === 0) {
-        console.log("Assessment failed or empty, generating fallback scores");
-        assessment = {
-          overallScore: 70,
-          words: longWords.map(w => ({
-            word: w,
-            score: 60 + Math.floor(Math.random() * 30),
-            tip: "",
-            problemPart: "",
-          })),
-        };
-      }
-
-      const overallScore = typeof assessment.overallScore === "number" ? assessment.overallScore : 70;
-      const assessedWords = Array.isArray(assessment.words)
-        ? assessment.words.filter((w: any) => typeof w.word === "string" && w.word.length >= 4)
-        : [];
-
-      console.log(`Assessment: overallScore=${overallScore}, words=${assessedWords.length}`);
+      console.log(`[Result] overallScore=${overallScore}, words=${enrichedWords.length}`);
 
       res.json({
         overallScore,
         transcript,
-        words: assessedWords,
+        words: enrichedWords,
       });
     } catch (error) {
       console.error("Error analyzing speech:", error);
@@ -121,9 +151,9 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
       }
 
       const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      const wavBuffer = await ensureWav16k(rawBuffer);
 
-      const transcript = await speechToText(audioBuffer, inputFormat);
+      const transcript = await speechToText(wavBuffer, "wav");
 
       if (!transcript || transcript.trim().length === 0) {
         return res.json({ transcript: "", words: [] });
@@ -136,55 +166,20 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
         return res.json({ transcript, words: [] });
       }
 
-      const assessmentResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a speech-language pathologist. Analyze pronunciation accuracy for a non-native English speaker's transcription.
+      console.log(`[Azure Chunk] Assessing ${words.length} words...`);
 
-ONLY score words with 4+ letters. Skip short words.
+      const azureResult = await assessPronunciation(wavBuffer, transcript);
+      console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
 
-Score each word 0-100:
-- 90-100: Native-like
-- 70-89: Minor accent
-- 50-69: Noticeable accent  
-- 30-49: Significant issues
-- 0-29: Major problems
+      const azureWords = azureResult.words.map(w => ({
+        word: w.word,
+        score: w.accuracyScore,
+        errorType: w.errorType,
+      }));
 
-For words below 85, add "problemPart": the specific syllable/letters being mispronounced (lowercase).
-Also include "phonetic": the IPA phonetic transcription.
+      const enrichedWords = await enrichWordsWithTips(azureWords);
 
-Respond with ONLY a JSON object (no markdown, no code blocks):
-{"words": [{"word": "hello", "score": 85, "tip": "", "problemPart": "", "phonetic": "/həˈloʊ/"}]}`,
-          },
-          {
-            role: "user",
-            content: `Analyze this transcription. Score each word with 4+ letters:\n\n"${transcript}"`,
-          },
-        ],
-        max_tokens: 2048,
-        temperature: 0.3,
-      });
-
-      const rawContent = assessmentResponse.choices[0]?.message?.content || "";
-      let assessment: any = null;
-      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-
-      try {
-        assessment = JSON.parse(jsonStr);
-      } catch {
-        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            assessment = JSON.parse(jsonMatch[0]);
-          } catch {}
-        }
-      }
-
-      const assessedWords = assessment?.words?.filter((w: any) => typeof w.word === "string" && w.word.length >= 4) || [];
-
-      res.json({ transcript, words: assessedWords });
+      res.json({ transcript, words: enrichedWords });
     } catch (error) {
       console.error("Error analyzing chunk:", error);
       res.status(500).json({ error: "Failed to analyze chunk" });
@@ -265,49 +260,51 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
       }
 
       const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      const wavBuffer = await ensureWav16k(rawBuffer);
 
-      const transcript = await speechToText(audioBuffer, inputFormat);
+      console.log(`[Azure Word] Assessing pronunciation of "${targetWord}"...`);
 
-      const assessmentResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a North American English pronunciation coach. The user attempted to say a specific target word. Compare what they said to the target word and score their pronunciation.
+      const azureResult = await azureAssessWord(wavBuffer, targetWord);
+      console.log(`[Azure Word] score=${azureResult.score}, errorType=${azureResult.errorType}`);
 
-Score from 0 to 100:
-- 90-100: Excellent, sounds native
-- 70-89: Good, minor improvements possible
-- 50-69: Acceptable but noticeable accent
-- 30-49: Needs significant work
-- 0-29: Very different from target
+      let feedback = "";
+      if (azureResult.score < 85) {
+        try {
+          const tipResponse = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: `You are a North American English pronunciation coach. Give brief, actionable feedback for improving the pronunciation of a word. Return ONLY valid JSON: {"feedback": "your tip here"}`,
+              },
+              {
+                role: "user",
+                content: `The user tried to say "${targetWord}" and scored ${azureResult.score}/100. ${azureResult.phonemes ? `Phoneme scores: ${azureResult.phonemes.map(p => `${p.phoneme}=${p.score}`).join(", ")}` : ""}\nGive a brief tip to improve.`,
+              },
+            ],
+            max_tokens: 128,
+            temperature: 0.3,
+          });
 
-IMPORTANT: Return ONLY valid JSON, no markdown. Return this exact structure:
-{ "score": <number>, "feedback": "<brief helpful feedback>" }`,
-          },
-          {
-            role: "user",
-            content: `Target word: "${targetWord}"\nWhat the user said (transcription): "${transcript}"\n\nAssess how accurately they pronounced the target word.`,
-          },
-        ],
-        max_tokens: 256,
-        temperature: 0.3,
-      });
-
-      const content = assessmentResponse.choices[0]?.message?.content || "{}";
-      let result;
-      try {
-        const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        result = JSON.parse(cleaned);
-      } catch {
-        result = { score: 50, feedback: "Try again" };
+          const tipRaw = tipResponse.choices[0]?.message?.content || "";
+          const tipCleaned = tipRaw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+          try {
+            const tipData = JSON.parse(tipCleaned);
+            feedback = tipData.feedback || "";
+          } catch {
+            feedback = "Keep practicing this word.";
+          }
+        } catch {
+          feedback = "Keep practicing this word.";
+        }
+      } else {
+        feedback = "Great pronunciation!";
       }
 
       res.json({
-        score: result.score || 50,
-        feedback: result.feedback || "",
-        transcript,
+        score: azureResult.score,
+        feedback,
+        transcript: targetWord,
       });
     } catch (error) {
       console.error("Error assessing word:", error);

@@ -51,7 +51,7 @@ export async function assessPronunciation(
       "Accept": "application/json;text/xml",
       "Pronunciation-Assessment": pronHeader,
     },
-    body: wavBuffer,
+    body: new Uint8Array(wavBuffer),
   });
 
   if (!response.ok) {
