@@ -1,11 +1,427 @@
-// template
-import { StyleSheet, Text, View } from "react-native";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  StyleSheet,
+  Text,
+  View,
+  Pressable,
+  ScrollView,
+  Platform,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system";
+import * as Haptics from "expo-haptics";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+  Easing,
+  cancelAnimation,
+} from "react-native-reanimated";
+import Colors from "@/constants/colors";
+import { apiRequest } from "@/lib/query-client";
+import {
+  addMispronouncedWords,
+  addSession,
+} from "@/lib/accent-storage";
 
-export default function TabOneScreen() {
+const MAX_DURATION = 300;
+
+interface WordResult {
+  word: string;
+  score: number;
+  tip: string;
+}
+
+interface AnalysisResult {
+  overallScore: number;
+  transcript: string;
+  words: WordResult[];
+}
+
+type ScreenState = "idle" | "recording" | "analyzing" | "results";
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function getScoreColor(score: number): string {
+  if (score >= 85) return Colors.dark.success;
+  if (score >= 65) return Colors.dark.warning;
+  return Colors.dark.error;
+}
+
+function getScoreBgColor(score: number): string {
+  if (score >= 85) return Colors.dark.successDim;
+  if (score >= 65) return Colors.dark.warningDim;
+  return Colors.dark.errorDim;
+}
+
+function WordScoreItem({ item }: { item: WordResult }) {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Your Replit app will be here</Text>
-      <Text style={styles.text}>Please wait until we finish building it</Text>
+    <View style={styles.wordItem}>
+      <Text style={styles.wordText}>{item.word}</Text>
+      <View style={[styles.scoreBadge, { backgroundColor: getScoreBgColor(item.score) }]}>
+        <Text style={[styles.scoreText, { color: getScoreColor(item.score) }]}>
+          {item.score}%
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export default function TalkScreen() {
+  const insets = useSafeAreaInsets();
+  const [state, setState] = useState<ScreenState>("idle");
+  const [elapsed, setElapsed] = useState(0);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [permission, setPermission] = useState<boolean | null>(null);
+
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pulseScale = useSharedValue(1);
+  const ringScale = useSharedValue(1);
+  const ringOpacity = useSharedValue(0);
+
+  const webTopInset = Platform.OS === "web" ? 67 : 0;
+
+  useEffect(() => {
+    checkPermission();
+  }, []);
+
+  const checkPermission = async () => {
+    const { status } = await Audio.getPermissionsAsync();
+    setPermission(status === "granted");
+  };
+
+  const requestPermission = async () => {
+    const { status } = await Audio.requestPermissionsAsync();
+    setPermission(status === "granted");
+  };
+
+  const startRecording = async () => {
+    try {
+      if (!permission) {
+        await requestPermission();
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync({
+        android: {
+          extension: ".m4a",
+          outputFormat: 2,
+          audioEncoder: 3,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: ".m4a",
+          outputFormat: 6,
+          audioQuality: 1,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
+        },
+        web: {
+          mimeType: "audio/webm",
+          bitsPerSecond: 128000,
+        },
+      });
+
+      await recording.startAsync();
+      recordingRef.current = recording;
+
+      setState("recording");
+      setElapsed(0);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.15, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      ringScale.value = withRepeat(
+        withSequence(
+          withTiming(1.8, { duration: 1500, easing: Easing.out(Easing.ease) }),
+          withTiming(1, { duration: 0 })
+        ),
+        -1
+      );
+      ringOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 0 }),
+          withTiming(0, { duration: 1500, easing: Easing.out(Easing.ease) })
+        ),
+        -1
+      );
+
+      timerRef.current = setInterval(() => {
+        setElapsed((prev) => {
+          if (prev >= MAX_DURATION - 1) {
+            stopRecording();
+            return MAX_DURATION;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      Alert.alert("Error", "Could not start recording. Please check microphone permissions.");
+    }
+  };
+
+  const stopRecording = useCallback(async () => {
+    try {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      cancelAnimation(pulseScale);
+      cancelAnimation(ringScale);
+      cancelAnimation(ringOpacity);
+      pulseScale.value = withTiming(1, { duration: 200 });
+      ringOpacity.value = withTiming(0, { duration: 200 });
+
+      const recording = recordingRef.current;
+      if (!recording) return;
+
+      setState("analyzing");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      recordingRef.current = null;
+
+      if (!uri) {
+        setState("idle");
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const response = await apiRequest("POST", "/api/analyze-speech", { audio: base64 });
+      const data: AnalysisResult = await response.json();
+
+      setResult(data);
+      setState("results");
+
+      if (data.words && data.words.length > 0) {
+        await addMispronouncedWords(data.words);
+        await addSession({
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          date: Date.now(),
+          overallScore: data.overallScore,
+          wordCount: data.words.length,
+        });
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error("Failed to stop/analyze recording:", err);
+      setState("idle");
+      Alert.alert("Error", "Failed to analyze your speech. Please try again.");
+    }
+  }, []);
+
+  const resetToIdle = () => {
+    setState("idle");
+    setResult(null);
+    setElapsed(0);
+  };
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+  }));
+
+  const ringStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale.value }],
+    opacity: ringOpacity.value,
+  }));
+
+  const remaining = MAX_DURATION - elapsed;
+
+  if (permission === null) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+        <ActivityIndicator color={Colors.dark.accent} size="large" />
+      </View>
+    );
+  }
+
+  if (permission === false) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+        <View style={styles.permissionContainer}>
+          <Ionicons name="mic-off" size={48} color={Colors.dark.textMuted} />
+          <Text style={styles.permissionTitle}>Microphone Access Required</Text>
+          <Text style={styles.permissionText}>
+            To analyze your accent, we need access to your microphone.
+          </Text>
+          <Pressable style={styles.permissionButton} onPress={requestPermission}>
+            <Text style={styles.permissionButtonText}>Allow Microphone</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (state === "results" && result) {
+    const lowScoreWords = result.words.filter((w) => w.score < 85);
+    const highScoreWords = result.words.filter((w) => w.score >= 85);
+
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Results</Text>
+          <Pressable onPress={resetToIdle} hitSlop={12}>
+            <Ionicons name="close" size={28} color={Colors.dark.textSecondary} />
+          </Pressable>
+        </View>
+
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.resultsContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.scoreCircleContainer}>
+            <View style={[styles.scoreCircle, { borderColor: getScoreColor(result.overallScore) }]}>
+              <Text style={[styles.scoreCircleNumber, { color: getScoreColor(result.overallScore) }]}>
+                {result.overallScore}
+              </Text>
+              <Text style={styles.scoreCirclePercent}>%</Text>
+            </View>
+            <Text style={styles.scoreLabel}>Overall Accent Score</Text>
+          </View>
+
+          <View style={styles.transcriptBox}>
+            <Text style={styles.sectionLabel}>What you said</Text>
+            <Text style={styles.transcriptText}>{result.transcript}</Text>
+          </View>
+
+          {lowScoreWords.length > 0 && (
+            <View style={styles.wordsSection}>
+              <View style={styles.sectionHeader}>
+                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={Colors.dark.warning} />
+                <Text style={[styles.sectionLabel, { color: Colors.dark.warning }]}>
+                  Needs Practice ({lowScoreWords.length})
+                </Text>
+              </View>
+              <View style={styles.wordsGrid}>
+                {lowScoreWords.map((w, i) => (
+                  <WordScoreItem key={`${w.word}-${i}`} item={w} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {highScoreWords.length > 0 && (
+            <View style={styles.wordsSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="checkmark-circle-outline" size={18} color={Colors.dark.success} />
+                <Text style={[styles.sectionLabel, { color: Colors.dark.success }]}>
+                  Good ({highScoreWords.length})
+                </Text>
+              </View>
+              <View style={styles.wordsGrid}>
+                {highScoreWords.map((w, i) => (
+                  <WordScoreItem key={`${w.word}-${i}`} item={w} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          <View style={{ height: 120 }} />
+        </ScrollView>
+
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) }]}>
+          <Pressable
+            style={({ pressed }) => [styles.tryAgainButton, pressed && { opacity: 0.85 }]}
+            onPress={resetToIdle}
+          >
+            <Ionicons name="refresh" size={20} color="#fff" />
+            <Text style={styles.tryAgainText}>Try Again</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Talk Mode</Text>
+        <View style={{ width: 28 }} />
+      </View>
+
+      <View style={styles.centerContent}>
+        {state === "analyzing" ? (
+          <View style={styles.analyzingContainer}>
+            <ActivityIndicator size="large" color={Colors.dark.accent} />
+            <Text style={styles.analyzingText}>Analyzing your accent...</Text>
+            <Text style={styles.analyzingSubtext}>This may take a moment</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.timerText}>
+              {state === "recording" ? formatTime(remaining) : "5:00"}
+            </Text>
+            <Text style={styles.timerLabel}>
+              {state === "recording" ? "Recording..." : "Tap to start speaking"}
+            </Text>
+
+            <View style={styles.micButtonContainer}>
+              <Animated.View style={[styles.pulseRing, ringStyle]} />
+              <Animated.View style={pulseStyle}>
+                <Pressable
+                  style={[
+                    styles.micButton,
+                    state === "recording" && styles.micButtonRecording,
+                  ]}
+                  onPress={state === "recording" ? stopRecording : startRecording}
+                >
+                  <Ionicons
+                    name={state === "recording" ? "stop" : "mic"}
+                    size={40}
+                    color="#fff"
+                  />
+                </Pressable>
+              </Animated.View>
+            </View>
+
+            <Text style={styles.hintText}>
+              {state === "recording"
+                ? "Speak naturally about any topic"
+                : "Speak for up to 5 minutes in English"}
+            </Text>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -13,17 +429,233 @@ export default function TabOneScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: Colors.dark.background,
+  },
+  header: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+  },
+  headerTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 22,
+    color: Colors.dark.text,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 24,
+  },
+  timerText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 56,
+    color: Colors.dark.text,
+    letterSpacing: 2,
+  },
+  timerLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 16,
+    color: Colors.dark.textSecondary,
+    marginTop: 8,
+    marginBottom: 48,
+  },
+  micButtonContainer: {
+    width: 140,
+    height: 140,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+  },
+  pulseRing: {
+    position: "absolute" as const,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 2,
+    borderColor: Colors.dark.accent,
+  },
+  micButton: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: Colors.dark.accent,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+  },
+  micButtonRecording: {
+    backgroundColor: Colors.dark.error,
+  },
+  hintText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
+    marginTop: 40,
+    textAlign: "center" as const,
+  },
+  analyzingContainer: {
+    alignItems: "center" as const,
+    gap: 16,
+  },
+  analyzingText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 20,
+    color: Colors.dark.text,
+    marginTop: 8,
+  },
+  analyzingSubtext: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 40,
+    gap: 12,
+  },
+  permissionTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 20,
+    color: Colors.dark.text,
+    textAlign: "center" as const,
+    marginTop: 8,
+  },
+  permissionText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 15,
+    color: Colors.dark.textSecondary,
+    textAlign: "center" as const,
+    lineHeight: 22,
+  },
+  permissionButton: {
+    marginTop: 16,
+    backgroundColor: Colors.dark.accent,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  permissionButtonText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 16,
+    color: "#fff",
+  },
+  scrollView: {
+    flex: 1,
+  },
+  resultsContent: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  scoreCircleContainer: {
+    alignItems: "center" as const,
+    marginBottom: 28,
+  },
+  scoreCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    backgroundColor: Colors.dark.surface,
+    flexDirection: "row" as const,
+  },
+  scoreCircleNumber: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 44,
+  },
+  scoreCirclePercent: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 18,
+    marginTop: 12,
+  },
+  scoreLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    marginTop: 12,
+  },
+  transcriptBox: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+  },
+  transcriptText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 15,
+    color: Colors.dark.text,
+    lineHeight: 24,
+    marginTop: 8,
+  },
+  wordsSection: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    marginBottom: 12,
+  },
+  sectionLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  wordsGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
     gap: 8,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
+  wordItem: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
   },
-  text: {
+  wordText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 15,
+    color: Colors.dark.text,
+  },
+  scoreBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  scoreText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 12,
+  },
+  bottomBar: {
+    position: "absolute" as const,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    backgroundColor: Colors.dark.background,
+  },
+  tryAgainButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: Colors.dark.accent,
+    borderRadius: 14,
+    paddingVertical: 16,
+    gap: 8,
+  },
+  tryAgainText: {
+    fontFamily: "Inter_600SemiBold",
     fontSize: 16,
-    textAlign: "center",
-    paddingHorizontal: 20,
+    color: "#fff",
   },
 });
