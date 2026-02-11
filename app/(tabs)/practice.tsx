@@ -331,12 +331,15 @@ export default function PracticeScreen() {
   const startWordRecording = async (word: string) => {
     try {
       if (!permission) {
-        await requestPermission();
-        return;
+        const { status } = await Audio.requestPermissionsAsync();
+        setPermission(status === "granted");
+        if (status !== "granted") return;
       }
 
       if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync();
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (_) {}
         recordingRef.current = null;
       }
 
@@ -345,31 +348,31 @@ export default function PracticeScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: ".m4a",
-          outputFormat: 2,
-          audioEncoder: 3,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: ".m4a",
-          outputFormat: 6,
-          audioQuality: 1,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        web: {
-          mimeType: "audio/webm",
-          bitsPerSecond: 128000,
-        },
-      });
+      const { recording } = await Audio.Recording.createAsync(
+        {
+          android: {
+            extension: ".m4a",
+            outputFormat: 2,
+            audioEncoder: 3,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          ios: {
+            extension: ".m4a",
+            outputFormat: Audio.IOSOutputFormat?.MPEG4AAC ?? 1633772320,
+            audioQuality: 127,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          web: {
+            mimeType: "audio/webm",
+            bitsPerSecond: 128000,
+          },
+        }
+      );
 
-      await recording.startAsync();
       recordingRef.current = recording;
       setRecordingWord(word);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

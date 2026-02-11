@@ -135,8 +135,16 @@ export default function TalkScreen() {
   const startRecording = async () => {
     try {
       if (!permission) {
-        await requestPermission();
-        return;
+        const { status } = await Audio.requestPermissionsAsync();
+        setPermission(status === "granted");
+        if (status !== "granted") return;
+      }
+
+      if (recordingRef.current) {
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (_) {}
+        recordingRef.current = null;
       }
 
       await Audio.setAudioModeAsync({
@@ -144,31 +152,31 @@ export default function TalkScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: ".m4a",
-          outputFormat: 2,
-          audioEncoder: 3,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: ".m4a",
-          outputFormat: 6,
-          audioQuality: 1,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        web: {
-          mimeType: "audio/webm",
-          bitsPerSecond: 128000,
-        },
-      });
+      const { recording } = await Audio.Recording.createAsync(
+        {
+          android: {
+            extension: ".m4a",
+            outputFormat: 2,
+            audioEncoder: 3,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          ios: {
+            extension: ".m4a",
+            audioQuality: 127,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+            outputFormat: Audio.IOSOutputFormat?.MPEG4AAC ?? 1633772320,
+          },
+          web: {
+            mimeType: "audio/webm",
+            bitsPerSecond: 128000,
+          },
+        }
+      );
 
-      await recording.startAsync();
       recordingRef.current = recording;
 
       setState("recording");
