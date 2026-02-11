@@ -117,3 +117,17 @@ export async function removeWord(word: string): Promise<void> {
   const filtered = words.filter((w) => w.word.toLowerCase() !== word.toLowerCase());
   await saveMispronouncedWords(filtered);
 }
+
+export async function clearAllWords(): Promise<void> {
+  await saveMispronouncedWords([]);
+}
+
+export async function clearLastSessionWords(): Promise<void> {
+  const sessions = await getSessions();
+  if (sessions.length === 0) return;
+  const lastSession = sessions[0];
+  const words = await getMispronouncedWords();
+  const cutoff = lastSession.date - 5000;
+  const filtered = words.filter((w) => w.lastSeen < cutoff);
+  await saveMispronouncedWords(filtered);
+}

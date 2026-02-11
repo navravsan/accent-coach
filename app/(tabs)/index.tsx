@@ -483,7 +483,6 @@ export default function TalkScreen() {
     const sortedWords = dedupedWords.sort((a, b) => a.score - b.score);
     const redWords = sortedWords.filter((w) => w.score < 50);
     const yellowWords = sortedWords.filter((w) => w.score >= 50 && w.score < 85);
-    const greenWords = sortedWords.filter((w) => w.score >= 85);
 
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -549,21 +548,6 @@ export default function TalkScreen() {
             </View>
           )}
 
-          {greenWords.length > 0 && (
-            <View style={styles.wordsSection}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="checkmark-circle-outline" size={18} color={Colors.dark.success} />
-                <Text style={[styles.sectionLabel, { color: Colors.dark.success }]}>
-                  Good ({greenWords.length})
-                </Text>
-              </View>
-              <View style={styles.wordsList}>
-                {greenWords.map((w, i) => (
-                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
-                ))}
-              </View>
-            </View>
-          )}
           <View style={styles.tryAgainContainer}>
             <Pressable
               style={({ pressed }) => [styles.tryAgainButton, pressed && { opacity: 0.85 }]}

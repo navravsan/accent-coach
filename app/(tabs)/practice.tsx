@@ -32,6 +32,8 @@ import {
   getTopPracticeWords,
   getAverageScore,
   updateWordScore,
+  clearAllWords,
+  clearLastSessionWords,
   type MispronouncedWord,
 } from "@/lib/accent-storage";
 import { useFocusEffect } from "expo-router";
@@ -466,6 +468,46 @@ export default function PracticeScreen() {
     }
   };
 
+  const handleClearAll = () => {
+    Alert.alert(
+      "Clear All Words",
+      "This will remove all practice words. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear All",
+          style: "destructive",
+          onPress: async () => {
+            await clearAllWords();
+            setFeedbacks({});
+            await loadWords();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClearLastSession = () => {
+    Alert.alert(
+      "Clear Last Session",
+      "This will remove all words from your most recent recording session.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            await clearLastSessionWords();
+            setFeedbacks({});
+            await loadWords();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ]
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -500,6 +542,23 @@ export default function PracticeScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.clearRow}>
+            <Pressable
+              style={({ pressed }) => [styles.clearBtn, pressed && { opacity: 0.7 }]}
+              onPress={handleClearAll}
+            >
+              <Ionicons name="trash-outline" size={15} color={Colors.dark.error} />
+              <Text style={styles.clearBtnText}>Clear All</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.clearBtn, pressed && { opacity: 0.7 }]}
+              onPress={handleClearLastSession}
+            >
+              <Ionicons name="close-circle-outline" size={15} color={Colors.dark.warning} />
+              <Text style={[styles.clearBtnText, { color: Colors.dark.warning }]}>Clear Last Session</Text>
+            </Pressable>
+          </View>
+
           <Text style={styles.subtitle}>
             Top {practiceWords.length} words to improve
           </Text>
@@ -570,6 +629,27 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     paddingHorizontal: 48,
     gap: 12,
+  },
+  clearRow: {
+    flexDirection: "row" as const,
+    justifyContent: "flex-end" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    marginBottom: 16,
+  },
+  clearBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: Colors.dark.surface,
+  },
+  clearBtnText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    color: Colors.dark.error,
   },
   emptyTitle: {
     fontFamily: "Inter_700Bold",
