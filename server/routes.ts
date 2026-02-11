@@ -45,9 +45,10 @@ Scoring guide (0-100):
 Rules:
 - ONLY score words that are 4 or more letters long. Skip short words like "the", "a", "is", "it", "and", "to", "in", "on", "of", "for", etc.
 - Give a brief tip for any word below 80
+- For words scoring below 85, include a "problemPart" field containing the specific syllable or letter cluster the speaker is mispronouncing (lowercase). For example if "integration" has trouble with the "gra" sound, set problemPart to "gra". If no specific part is problematic, set it to empty string.
 
 You MUST return a JSON object with this exact structure:
-{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": ""}, {"word": "world", "score": 62, "tip": "Round your lips more on the 'w' sound"}]}`,
+{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": ""}, {"word": "integration", "score": 62, "tip": "Soften the 'gra' cluster", "problemPart": "gra"}]}`,
           },
           {
             role: "user",

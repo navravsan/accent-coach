@@ -36,6 +36,8 @@ interface WordResult {
   word: string;
   score: number;
   tip: string;
+  problemPart?: string;
+  count?: number;
 }
 
 interface AnalysisResult {
@@ -58,12 +60,43 @@ function getScoreColor(score: number): string {
   return Colors.dark.error;
 }
 
-function WordScoreRow({ item }: { item: WordResult }) {
+function HighlightedWord({ word, problemPart }: { word: string; problemPart?: string }) {
+  if (!problemPart || problemPart.length === 0) {
+    return <Text style={styles.wordRowText}>{word}</Text>;
+  }
+  const lower = word.toLowerCase();
+  const partLower = problemPart.toLowerCase();
+  const idx = lower.indexOf(partLower);
+  if (idx === -1) {
+    return <Text style={styles.wordRowText}>{word}</Text>;
+  }
+  const before = word.slice(0, idx);
+  const match = word.slice(idx, idx + problemPart.length);
+  const after = word.slice(idx + problemPart.length);
+  return (
+    <Text style={styles.wordRowText}>
+      {before}
+      <Text style={styles.wordProblemPart}>{match}</Text>
+      {after}
+    </Text>
+  );
+}
+
+function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight?: boolean }) {
   const color = getScoreColor(item.score);
   return (
     <View style={styles.wordRow}>
-      <Text style={styles.wordRowText}>{item.word}</Text>
-      <Text style={[styles.wordRowScore, { color }]}>{item.score}%</Text>
+      {showHighlight ? (
+        <HighlightedWord word={item.word} problemPart={item.problemPart} />
+      ) : (
+        <Text style={styles.wordRowText}>{item.word}</Text>
+      )}
+      <View style={styles.wordRowRight}>
+        <Text style={[styles.wordRowScore, { color }]}>{item.score}%</Text>
+        {item.count && item.count > 1 && (
+          <Text style={styles.wordRowCount}>({item.count})</Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -301,7 +334,31 @@ export default function TalkScreen() {
   }
 
   if (state === "results" && result) {
-    const sortedWords = [...result.words].sort((a, b) => a.score - b.score);
+    const wordMap = new Map<string, WordResult>();
+    const countMap = new Map<string, number>();
+    for (const w of result.words) {
+      const key = w.word.toLowerCase();
+      const existing = wordMap.get(key);
+      const count = (countMap.get(key) || 0) + 1;
+      countMap.set(key, count);
+      if (existing) {
+        const prevTotal = existing.score * (count - 1);
+        existing.score = Math.round((prevTotal + w.score) / count);
+        if (w.problemPart && !existing.problemPart) {
+          existing.problemPart = w.problemPart;
+        }
+        if (w.tip && !existing.tip) {
+          existing.tip = w.tip;
+        }
+      } else {
+        wordMap.set(key, { ...w });
+      }
+    }
+    const dedupedWords = Array.from(wordMap.values()).map((w) => ({
+      ...w,
+      count: countMap.get(w.word.toLowerCase()) || 1,
+    }));
+    const sortedWords = dedupedWords.sort((a, b) => a.score - b.score);
     const redWords = sortedWords.filter((w) => w.score < 50);
     const yellowWords = sortedWords.filter((w) => w.score >= 50 && w.score < 85);
     const greenWords = sortedWords.filter((w) => w.score >= 85);
@@ -317,7 +374,10 @@ export default function TalkScreen() {
 
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={styles.resultsContent}
+          contentContainerStyle={[
+            styles.resultsContent,
+            { paddingBottom: 100 + Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.scoreCircleContainer}>
@@ -345,7 +405,7 @@ export default function TalkScreen() {
               </View>
               <View style={styles.wordsList}>
                 {redWords.map((w, i) => (
-                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
+                  <WordScoreRow key={`${w.word}-${i}`} item={w} showHighlight />
                 ))}
               </View>
             </View>
@@ -361,7 +421,7 @@ export default function TalkScreen() {
               </View>
               <View style={styles.wordsList}>
                 {yellowWords.map((w, i) => (
-                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
+                  <WordScoreRow key={`${w.word}-${i}`} item={w} showHighlight />
                 ))}
               </View>
             </View>
@@ -382,8 +442,6 @@ export default function TalkScreen() {
               </View>
             </View>
           )}
-
-          <View style={{ height: 120 }} />
         </ScrollView>
 
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) }]}>
@@ -708,9 +766,24 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     textTransform: "capitalize" as const,
   },
+  wordRowRight: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+  },
   wordRowScore: {
     fontFamily: "Inter_700Bold",
     fontSize: 16,
+  },
+  wordRowCount: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: Colors.dark.textMuted,
+  },
+  wordProblemPart: {
+    color: Colors.dark.error,
+    fontFamily: "Inter_700Bold",
+    textDecorationLine: "underline" as const,
   },
   bottomBar: {
     position: "absolute" as const,
