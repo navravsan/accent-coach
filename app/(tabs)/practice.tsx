@@ -52,20 +52,52 @@ interface PracticeWord extends MispronouncedWord {
   avgScore: number;
 }
 
+interface PracticeFeedback {
+  score: number;
+  feedback: string;
+  recordingUri?: string;
+}
+
+function HighlightedWord({ word, problemPart, style }: { word: string; problemPart?: string; style: any }) {
+  if (!problemPart || problemPart.length === 0) {
+    return <Text style={style}>{word}</Text>;
+  }
+  const lower = word.toLowerCase();
+  const partLower = problemPart.toLowerCase();
+  const idx = lower.indexOf(partLower);
+  if (idx === -1) {
+    return <Text style={style}>{word}</Text>;
+  }
+  const before = word.slice(0, idx);
+  const match = word.slice(idx, idx + problemPart.length);
+  const after = word.slice(idx + problemPart.length);
+  return (
+    <Text style={style}>
+      {before}
+      <Text style={{ color: Colors.dark.error, textDecorationLine: "underline" }}>{match}</Text>
+      {after}
+    </Text>
+  );
+}
+
 function PracticeWordCard({
   item,
-  onPlay,
+  onPlayCorrect,
+  onPlayRecording,
   onRecord,
-  isPlaying,
+  isPlayingCorrect,
+  isPlayingRecording,
   isRecording,
   latestFeedback,
 }: {
   item: PracticeWord;
-  onPlay: () => void;
+  onPlayCorrect: () => void;
+  onPlayRecording: () => void;
   onRecord: () => void;
-  isPlaying: boolean;
+  isPlayingCorrect: boolean;
+  isPlayingRecording: boolean;
   isRecording: boolean;
-  latestFeedback: string | null;
+  latestFeedback: PracticeFeedback | null;
 }) {
   const pulseScale = useSharedValue(1);
 
@@ -97,7 +129,14 @@ function PracticeWordCard({
     <View style={cardStyles.card}>
       <View style={cardStyles.topRow}>
         <View style={cardStyles.wordInfo}>
-          <Text style={cardStyles.wordText}>{item.word}</Text>
+          <HighlightedWord
+            word={item.word}
+            problemPart={item.problemPart}
+            style={cardStyles.wordText}
+          />
+          {item.phonetic ? (
+            <Text style={cardStyles.phoneticText}>{item.phonetic}</Text>
+          ) : null}
           <View style={cardStyles.metaRow}>
             <View style={[cardStyles.scorePill, { backgroundColor: getScoreBgColor(avgScore) }]}>
               <Text style={[cardStyles.scoreValue, { color: getScoreColor(avgScore) }]}>
@@ -113,10 +152,10 @@ function PracticeWordCard({
         <View style={cardStyles.actions}>
           <Pressable
             style={({ pressed }) => [cardStyles.actionBtn, pressed && { opacity: 0.7 }]}
-            onPress={onPlay}
-            disabled={isPlaying}
+            onPress={onPlayCorrect}
+            disabled={isPlayingCorrect}
           >
-            {isPlaying ? (
+            {isPlayingCorrect ? (
               <ActivityIndicator size="small" color={Colors.dark.accent} />
             ) : (
               <Ionicons name="volume-high" size={22} color={Colors.dark.accent} />
@@ -150,9 +189,33 @@ function PracticeWordCard({
       )}
 
       {latestFeedback && (
-        <View style={cardStyles.feedbackRow}>
-          <Ionicons name="chatbubble-outline" size={14} color={Colors.dark.success} />
-          <Text style={cardStyles.feedbackText}>{latestFeedback}</Text>
+        <View style={cardStyles.feedbackContainer}>
+          <View style={cardStyles.feedbackScoreRow}>
+            <View style={[cardStyles.feedbackScorePill, { backgroundColor: getScoreBgColor(latestFeedback.score) }]}>
+              <Text style={[cardStyles.feedbackScoreText, { color: getScoreColor(latestFeedback.score) }]}>
+                Practice: {latestFeedback.score}%
+              </Text>
+            </View>
+            {latestFeedback.recordingUri && (
+              <Pressable
+                style={({ pressed }) => [cardStyles.playMyRecBtn, pressed && { opacity: 0.7 }]}
+                onPress={onPlayRecording}
+                disabled={isPlayingRecording}
+              >
+                {isPlayingRecording ? (
+                  <ActivityIndicator size="small" color={Colors.dark.textSecondary} />
+                ) : (
+                  <>
+                    <Ionicons name="ear-outline" size={14} color={Colors.dark.textSecondary} />
+                    <Text style={cardStyles.playMyRecText}>My recording</Text>
+                  </>
+                )}
+              </Pressable>
+            )}
+          </View>
+          {latestFeedback.feedback ? (
+            <Text style={cardStyles.feedbackMessage}>{latestFeedback.feedback}</Text>
+          ) : null}
         </View>
       )}
     </View>
@@ -164,8 +227,9 @@ export default function PracticeScreen() {
   const [practiceWords, setPracticeWords] = useState<PracticeWord[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingWord, setPlayingWord] = useState<string | null>(null);
+  const [playingRecording, setPlayingRecording] = useState<string | null>(null);
   const [recordingWord, setRecordingWord] = useState<string | null>(null);
-  const [feedbacks, setFeedbacks] = useState<Record<string, string>>({});
+  const [feedbacks, setFeedbacks] = useState<Record<string, PracticeFeedback>>({});
   const [permission, setPermission] = useState<boolean | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -315,6 +379,37 @@ export default function PracticeScreen() {
     }
   };
 
+  const playUserRecording = async (word: string) => {
+    const fb = feedbacks[word.toLowerCase()];
+    if (!fb?.recordingUri) return;
+
+    try {
+      setPlayingRecording(word);
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync({ uri: fb.recordingUri });
+      soundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingRecording(null);
+          sound.unloadAsync();
+        }
+      });
+      await sound.playAsync();
+    } catch (err) {
+      console.error("Error playing recording:", err);
+      setPlayingRecording(null);
+    }
+  };
+
   const stopWordRecording = async (word: string) => {
     try {
       const recording = recordingRef.current;
@@ -362,7 +457,11 @@ export default function PracticeScreen() {
 
       setFeedbacks((prev) => ({
         ...prev,
-        [word.toLowerCase()]: `${data.score}% — ${data.feedback}`,
+        [word.toLowerCase()]: {
+          score: data.score,
+          feedback: data.feedback || "",
+          recordingUri: uri,
+        },
       }));
 
       await loadWords();
@@ -430,9 +529,11 @@ export default function PracticeScreen() {
             <Animated.View key={word.word} entering={FadeIn.delay(index * 50)}>
               <PracticeWordCard
                 item={word}
-                onPlay={() => playWord(word.word)}
+                onPlayCorrect={() => playWord(word.word)}
+                onPlayRecording={() => playUserRecording(word.word)}
                 onRecord={() => handleRecord(word.word)}
-                isPlaying={playingWord === word.word}
+                isPlayingCorrect={playingWord === word.word}
+                isPlayingRecording={playingRecording === word.word}
                 isRecording={recordingWord === word.word}
                 latestFeedback={feedbacks[word.word.toLowerCase()] || null}
               />
@@ -560,6 +661,13 @@ const cardStyles = StyleSheet.create({
   recordingBtn: {
     backgroundColor: Colors.dark.error,
   },
+  phoneticText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
+    marginTop: 2,
+    fontStyle: "italic" as const,
+  },
   tipRow: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
@@ -576,17 +684,45 @@ const cardStyles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  feedbackRow: {
-    flexDirection: "row" as const,
-    alignItems: "flex-start" as const,
-    gap: 6,
-    marginTop: 8,
+  feedbackContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.dark.border,
+    gap: 8,
   },
-  feedbackText: {
-    fontFamily: "Inter_500Medium",
+  feedbackScoreRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  feedbackScorePill: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  feedbackScoreText: {
+    fontFamily: "Inter_600SemiBold",
     fontSize: 13,
-    color: Colors.dark.success,
-    flex: 1,
+  },
+  playMyRecBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: Colors.dark.surfaceLight,
+  },
+  playMyRecText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
+    color: Colors.dark.textSecondary,
+  },
+  feedbackMessage: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
     lineHeight: 18,
   },
 });

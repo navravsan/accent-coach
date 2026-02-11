@@ -48,8 +48,10 @@ Score each word 0-100:
 
 For words below 85, add "problemPart": the specific syllable/letters being mispronounced (lowercase). Example: for "integration" with trouble on "gra", set problemPart to "gra".
 
+Also include "phonetic": the IPA phonetic transcription of how the word SHOULD be pronounced in North American English. Example: "integration" -> "/ˌɪntɪˈɡreɪʃən/"
+
 Respond with ONLY a JSON object (no markdown, no code blocks):
-{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": ""}, {"word": "integration", "score": 62, "tip": "Soften the gra cluster", "problemPart": "gra"}]}`,
+{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": "", "phonetic": "/həˈloʊ/"}, {"word": "integration", "score": 62, "tip": "Soften the gra cluster", "problemPart": "gra", "phonetic": "/ˌɪntɪˈɡreɪʃən/"}]}`,
           },
           {
             role: "user",
@@ -141,7 +143,7 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
       const transcript = await speechToText(audioBuffer, inputFormat);
 
       const assessmentResponse = await openai.chat.completions.create({
-        model: "gpt-5-mini",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -162,7 +164,8 @@ IMPORTANT: Return ONLY valid JSON, no markdown. Return this exact structure:
             content: `Target word: "${targetWord}"\nWhat the user said (transcription): "${transcript}"\n\nAssess how accurately they pronounced the target word.`,
           },
         ],
-        max_completion_tokens: 256,
+        max_tokens: 256,
+        temperature: 0.3,
       });
 
       const content = assessmentResponse.choices[0]?.message?.content || "{}";
