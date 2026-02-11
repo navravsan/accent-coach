@@ -38,13 +38,13 @@ import { useFocusEffect } from "expo-router";
 
 function getScoreColor(score: number): string {
   if (score >= 85) return Colors.dark.success;
-  if (score >= 65) return Colors.dark.warning;
+  if (score >= 50) return Colors.dark.warning;
   return Colors.dark.error;
 }
 
 function getScoreBgColor(score: number): string {
   if (score >= 85) return Colors.dark.successDim;
-  if (score >= 65) return Colors.dark.warningDim;
+  if (score >= 50) return Colors.dark.warningDim;
   return Colors.dark.errorDim;
 }
 
@@ -193,11 +193,12 @@ export default function PracticeScreen() {
   const loadWords = async () => {
     setLoading(true);
     const allWords = await getMispronouncedWords();
-    const top = getTopPracticeWords(allWords, 10);
+    const top = getTopPracticeWords(allWords, 20);
     const withAvg = top.map((w) => ({
       ...w,
       avgScore: getAverageScore(w),
     }));
+    withAvg.sort((a, b) => a.avgScore - b.avgScore);
     setPracticeWords(withAvg);
     setLoading(false);
   };

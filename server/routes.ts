@@ -43,9 +43,7 @@ Scoring guide (0-100):
 0-29: Major problems
 
 Rules:
-- Score EVERY word in the transcription
-- Common short words (the, a, is, it, and, to) score 80-95
-- Longer/complex words get varied scores
+- ONLY score words that are 4 or more letters long. Skip short words like "the", "a", "is", "it", "and", "to", "in", "on", "of", "for", etc.
 - Give a brief tip for any word below 80
 
 You MUST return a JSON object with this exact structure:
@@ -76,7 +74,9 @@ You MUST return a JSON object with this exact structure:
       }
 
       const overallScore = typeof assessment.overallScore === "number" ? assessment.overallScore : 65;
-      const assessedWords = Array.isArray(assessment.words) ? assessment.words : [];
+      const assessedWords = Array.isArray(assessment.words)
+        ? assessment.words.filter((w: any) => typeof w.word === "string" && w.word.length >= 4)
+        : [];
 
       console.log(`Assessment: overallScore=${overallScore}, words=${assessedWords.length}`);
 

@@ -39,6 +39,7 @@ export async function addMispronouncedWords(
 
   for (const nw of newWords) {
     if (nw.score >= 85) continue;
+    if (nw.word.length < 4) continue;
     const key = nw.word.toLowerCase();
     const current = wordMap.get(key);
     if (current) {

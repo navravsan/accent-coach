@@ -54,25 +54,16 @@ function formatTime(seconds: number): string {
 
 function getScoreColor(score: number): string {
   if (score >= 85) return Colors.dark.success;
-  if (score >= 65) return Colors.dark.warning;
+  if (score >= 50) return Colors.dark.warning;
   return Colors.dark.error;
 }
 
-function getScoreBgColor(score: number): string {
-  if (score >= 85) return Colors.dark.successDim;
-  if (score >= 65) return Colors.dark.warningDim;
-  return Colors.dark.errorDim;
-}
-
-function WordScoreItem({ item }: { item: WordResult }) {
+function WordScoreRow({ item }: { item: WordResult }) {
+  const color = getScoreColor(item.score);
   return (
-    <View style={styles.wordItem}>
-      <Text style={styles.wordText}>{item.word}</Text>
-      <View style={[styles.scoreBadge, { backgroundColor: getScoreBgColor(item.score) }]}>
-        <Text style={[styles.scoreText, { color: getScoreColor(item.score) }]}>
-          {item.score}%
-        </Text>
-      </View>
+    <View style={styles.wordRow}>
+      <Text style={styles.wordRowText}>{item.word}</Text>
+      <Text style={[styles.wordRowScore, { color }]}>{item.score}%</Text>
     </View>
   );
 }
@@ -310,8 +301,10 @@ export default function TalkScreen() {
   }
 
   if (state === "results" && result) {
-    const lowScoreWords = result.words.filter((w) => w.score < 85);
-    const highScoreWords = result.words.filter((w) => w.score >= 85);
+    const sortedWords = [...result.words].sort((a, b) => a.score - b.score);
+    const redWords = sortedWords.filter((w) => w.score < 50);
+    const yellowWords = sortedWords.filter((w) => w.score >= 50 && w.score < 85);
+    const greenWords = sortedWords.filter((w) => w.score >= 85);
 
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -342,33 +335,49 @@ export default function TalkScreen() {
             <Text style={styles.transcriptText}>{result.transcript}</Text>
           </View>
 
-          {lowScoreWords.length > 0 && (
+          {redWords.length > 0 && (
             <View style={styles.wordsSection}>
               <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={Colors.dark.warning} />
-                <Text style={[styles.sectionLabel, { color: Colors.dark.warning }]}>
-                  Needs Practice ({lowScoreWords.length})
+                <Ionicons name="alert-circle" size={18} color={Colors.dark.error} />
+                <Text style={[styles.sectionLabel, { color: Colors.dark.error }]}>
+                  Needs Work ({redWords.length})
                 </Text>
               </View>
-              <View style={styles.wordsGrid}>
-                {lowScoreWords.map((w, i) => (
-                  <WordScoreItem key={`${w.word}-${i}`} item={w} />
+              <View style={styles.wordsList}>
+                {redWords.map((w, i) => (
+                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
                 ))}
               </View>
             </View>
           )}
 
-          {highScoreWords.length > 0 && (
+          {yellowWords.length > 0 && (
+            <View style={styles.wordsSection}>
+              <View style={styles.sectionHeader}>
+                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={Colors.dark.warning} />
+                <Text style={[styles.sectionLabel, { color: Colors.dark.warning }]}>
+                  Improving ({yellowWords.length})
+                </Text>
+              </View>
+              <View style={styles.wordsList}>
+                {yellowWords.map((w, i) => (
+                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {greenWords.length > 0 && (
             <View style={styles.wordsSection}>
               <View style={styles.sectionHeader}>
                 <Ionicons name="checkmark-circle-outline" size={18} color={Colors.dark.success} />
                 <Text style={[styles.sectionLabel, { color: Colors.dark.success }]}>
-                  Good ({highScoreWords.length})
+                  Good ({greenWords.length})
                 </Text>
               </View>
-              <View style={styles.wordsGrid}>
-                {highScoreWords.map((w, i) => (
-                  <WordScoreItem key={`${w.word}-${i}`} item={w} />
+              <View style={styles.wordsList}>
+                {greenWords.map((w, i) => (
+                  <WordScoreRow key={`${w.word}-${i}`} item={w} />
                 ))}
               </View>
             </View>
@@ -679,33 +688,29 @@ const styles = StyleSheet.create({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
-  wordsGrid: {
-    flexDirection: "row" as const,
-    flexWrap: "wrap" as const,
-    gap: 8,
-  },
-  wordItem: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
+  wordsList: {
     backgroundColor: Colors.dark.surface,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
+    borderRadius: 12,
+    overflow: "hidden" as const,
   },
-  wordText: {
+  wordRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.dark.border,
+  },
+  wordRowText: {
     fontFamily: "Inter_500Medium",
-    fontSize: 15,
+    fontSize: 16,
     color: Colors.dark.text,
+    textTransform: "capitalize" as const,
   },
-  scoreBadge: {
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  scoreText: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 12,
+  wordRowScore: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 16,
   },
   bottomBar: {
     position: "absolute" as const,
