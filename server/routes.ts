@@ -13,6 +13,46 @@ async function ensureWav16k(rawBuffer: Buffer): Promise<Buffer> {
   return buffer;
 }
 
+function normalizeWord(w: string): string {
+  return w.toLowerCase().replace(/[^a-z']/g, "");
+}
+
+function findMatchingArticleSection(transcript: string, fullArticle: string): string {
+  const transcriptWords = transcript.split(/\s+/).map(normalizeWord).filter(w => w.length > 0);
+  const articleWords = fullArticle.split(/\s+/).filter(w => w.trim().length > 0);
+  const articleNorm = articleWords.map(normalizeWord);
+
+  if (transcriptWords.length === 0 || articleWords.length === 0) return transcript;
+
+  const windowSize = Math.min(transcriptWords.length + 10, articleWords.length);
+  let bestStart = 0;
+  let bestScore = -1;
+
+  for (let start = 0; start <= articleWords.length - Math.min(windowSize, articleWords.length); start++) {
+    let score = 0;
+    const end = Math.min(start + windowSize, articleWords.length);
+    const windowSet = new Set(articleNorm.slice(start, end));
+
+    for (const tw of transcriptWords) {
+      if (tw.length >= 3 && windowSet.has(tw)) score++;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = start;
+    }
+  }
+
+  const padding = 5;
+  const sliceStart = Math.max(0, bestStart - padding);
+  const sliceEnd = Math.min(articleWords.length, bestStart + windowSize + padding);
+  const matched = articleWords.slice(sliceStart, sliceEnd).join(" ");
+
+  console.log(`[Reference Match] transcript=${transcriptWords.length} words, matched article section starting at word ${bestStart} (score=${bestScore}/${transcriptWords.length})`);
+
+  return matched;
+}
+
 async function extractWordAudio(
   wavBuffer: Buffer,
   word: AzureWordResult
@@ -159,8 +199,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const azureRef = referenceText && referenceText.trim().length > 0 ? referenceText : transcript;
-      console.log(`[Azure] Assessing pronunciation (${transcript.split(/\s+/).length} words, using ${referenceText ? 'article' : 'transcript'} as reference)...`);
+      let azureRef: string;
+      if (referenceText && referenceText.trim().length > 0) {
+        azureRef = findMatchingArticleSection(transcript, referenceText);
+      } else {
+        azureRef = transcript;
+      }
+      console.log(`[Azure] Assessing pronunciation (${transcript.split(/\s+/).length} words, ref=${azureRef.split(/\s+/).length} words from ${referenceText ? 'matched article section' : 'transcript'})...`);
 
       const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
@@ -211,8 +256,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ transcript, words: [] });
       }
 
-      const azureRef = referenceText && referenceText.trim().length > 0 ? referenceText : transcript;
-      console.log(`[Azure Chunk] Assessing ${words.length} words (using ${referenceText ? 'article' : 'transcript'} as reference)...`);
+      let azureRef: string;
+      if (referenceText && referenceText.trim().length > 0) {
+        azureRef = findMatchingArticleSection(transcript, referenceText);
+      } else {
+        azureRef = transcript;
+      }
+      console.log(`[Azure Chunk] Assessing ${words.length} words (ref=${azureRef.split(/\s+/).length} words from ${referenceText ? 'matched article section' : 'transcript'})...`);
 
       const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
