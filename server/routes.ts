@@ -24,52 +24,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      const words = transcript.replace(/[^\w\s'-]/g, "").split(/\s+/).filter(Boolean);
+      console.log(`Transcript has ${words.length} words, requesting assessment...`);
+
       const assessmentResponse = await openai.chat.completions.create({
         model: "gpt-5-mini",
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content: `You are an expert speech-language pathologist specializing in North American English accent training for non-native speakers. You will be given a transcription of someone speaking English. Your job is to analyze the transcription and estimate pronunciation accuracy for each word.
+            content: `You are an expert speech-language pathologist specializing in North American English accent training. Analyze a transcription and score each word's pronunciation accuracy.
 
-Score each word from 0 to 100:
-- 90-100: Native-like pronunciation (clear, natural)
-- 70-89: Good pronunciation with minor accent
-- 50-69: Noticeable accent, could improve
-- 30-49: Significant pronunciation issues
-- 0-29: Major pronunciation problems
+Scoring guide (0-100):
+90-100: Native-like
+70-89: Good, minor accent
+50-69: Noticeable accent
+30-49: Significant issues
+0-29: Major problems
 
-Be realistic and varied in your scoring. Common short words (the, a, is, it) should generally score higher (80-100). Longer or more complex words should have more varied scores. Give actionable tips for words scoring below 80.
+Rules:
+- Score EVERY word in the transcription
+- Common short words (the, a, is, it, and, to) score 80-95
+- Longer/complex words get varied scores
+- Give a brief tip for any word below 80
 
-IMPORTANT: Return ONLY valid JSON, no markdown formatting, no code blocks. Return this exact JSON structure:
-{
-  "overallScore": <number 0-100>,
-  "words": [
-    { "word": "<word>", "score": <number 0-100>, "tip": "<brief pronunciation tip or empty string>" }
-  ]
-}`,
+You MUST return a JSON object with this exact structure:
+{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": ""}, {"word": "world", "score": 62, "tip": "Round your lips more on the 'w' sound"}]}`,
           },
           {
             role: "user",
-            content: `Analyze the pronunciation accuracy of this transcription from a non-native English speaker:\n\n"${transcript}"`,
+            content: `Score every word in this transcription:\n\n"${transcript}"`,
           },
         ],
-        max_completion_tokens: 4096,
+        max_completion_tokens: 8192,
       });
 
       const content = assessmentResponse.choices[0]?.message?.content || "{}";
+      console.log("Assessment raw response length:", content.length);
 
       let assessment;
       try {
-        const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        assessment = JSON.parse(cleaned);
-      } catch {
-        assessment = { overallScore: 75, words: [] };
+        assessment = JSON.parse(content);
+      } catch (parseErr) {
+        console.error("Failed to parse assessment JSON:", content.substring(0, 500));
+        try {
+          const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+          assessment = JSON.parse(cleaned);
+        } catch {
+          assessment = { overallScore: 65, words: words.map(w => ({ word: w, score: 70, tip: "" })) };
+        }
       }
 
+      const overallScore = typeof assessment.overallScore === "number" ? assessment.overallScore : 65;
+      const assessedWords = Array.isArray(assessment.words) ? assessment.words : [];
+
+      console.log(`Assessment: overallScore=${overallScore}, words=${assessedWords.length}`);
+
       res.json({
-        overallScore: assessment.overallScore || 0,
+        overallScore,
         transcript,
-        words: assessment.words || [],
+        words: assessedWords,
       });
     } catch (error) {
       console.error("Error analyzing speech:", error);
