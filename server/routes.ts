@@ -97,7 +97,7 @@ Respond with ONLY a JSON object (no markdown):
 export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/analyze-speech", async (req: Request, res: Response) => {
     try {
-      const { audio } = req.body;
+      const { audio, referenceText } = req.body;
       if (!audio) {
         return res.status(400).json({ error: "Audio data is required" });
       }
@@ -115,9 +115,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log(`[Azure] Assessing pronunciation for transcript (${transcript.split(/\s+/).length} words)...`);
+      const azureRef = referenceText && referenceText.trim().length > 0 ? referenceText : transcript;
+      console.log(`[Azure] Assessing pronunciation (${transcript.split(/\s+/).length} words, using ${referenceText ? 'article' : 'transcript'} as reference)...`);
 
-      const azureResult = await assessPronunciation(wavBuffer, transcript);
+      const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
 
       const azureWords = azureResult.words.map(w => ({
@@ -145,7 +146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/analyze-chunk", async (req: Request, res: Response) => {
     try {
-      const { audio } = req.body;
+      const { audio, referenceText } = req.body;
       if (!audio) {
         return res.status(400).json({ error: "Audio data is required" });
       }
@@ -166,9 +167,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ transcript, words: [] });
       }
 
-      console.log(`[Azure Chunk] Assessing ${words.length} words...`);
+      const azureRef = referenceText && referenceText.trim().length > 0 ? referenceText : transcript;
+      console.log(`[Azure Chunk] Assessing ${words.length} words (using ${referenceText ? 'article' : 'transcript'} as reference)...`);
 
-      const azureResult = await assessPronunciation(wavBuffer, transcript);
+      const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
 
       const azureWords = azureResult.words.map(w => ({

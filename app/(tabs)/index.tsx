@@ -113,6 +113,7 @@ export default function TalkScreen() {
   const [article, setArticle] = useState<{ title: string; body: string } | null>(null);
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleExpanded, setArticleExpanded] = useState(false);
+  const articleRef = useRef<{ title: string; body: string } | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -127,6 +128,10 @@ export default function TalkScreen() {
   const ringOpacity = useSharedValue(0);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
+
+  useEffect(() => {
+    articleRef.current = article;
+  }, [article]);
 
   useEffect(() => {
     checkPermission();
@@ -341,7 +346,8 @@ export default function TalkScreen() {
         const lastChunk = (async () => {
           try {
             const base64 = await getAudioBase64(uri);
-            const articleText = article ? `${article.title}\n${article.body}` : "";
+            const currentArticle = articleRef.current;
+            const articleText = currentArticle ? `${currentArticle.title}\n${currentArticle.body}` : "";
             const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64, referenceText: articleText });
             const data = await response.json();
             if (data.words && data.words.length > 0) {
