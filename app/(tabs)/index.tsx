@@ -37,6 +37,8 @@ interface WordResult {
   score: number;
   tip: string;
   problemPart?: string;
+  phonetic?: string;
+  userAudio?: string;
   count?: number;
 }
 

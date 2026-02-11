@@ -7,6 +7,8 @@ export interface AzureWordResult {
   word: string;
   accuracyScore: number;
   errorType: string;
+  offset: number;
+  duration: number;
   phonemes?: Array<{
     phoneme: string;
     accuracyScore: number;
@@ -90,6 +92,8 @@ export async function assessPronunciation(
     word: w.Word,
     accuracyScore: w.PronunciationAssessment?.AccuracyScore ?? w.AccuracyScore ?? 0,
     errorType: w.PronunciationAssessment?.ErrorType ?? w.ErrorType ?? "None",
+    offset: w.Offset ?? 0,
+    duration: w.Duration ?? 0,
     phonemes: w.Phonemes?.map((p: any) => ({
       phoneme: p.Phoneme,
       accuracyScore: p.PronunciationAssessment?.AccuracyScore ?? 0,

@@ -1,12 +1,56 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { openai, speechToText, textToSpeech, ensureCompatibleFormat, convertToWav } from "./replit_integrations/audio/client";
-import { assessPronunciation, assessWord as azureAssessWord } from "./azure-speech";
+import { assessPronunciation, assessWord as azureAssessWord, type AzureWordResult } from "./azure-speech";
 import { Buffer } from "node:buffer";
+import { execFile } from "node:child_process";
+import { writeFile, readFile, unlink, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 async function ensureWav16k(rawBuffer: Buffer): Promise<Buffer> {
   const { buffer } = await ensureCompatibleFormat(rawBuffer);
   return buffer;
+}
+
+async function extractWordAudio(
+  wavBuffer: Buffer,
+  word: AzureWordResult
+): Promise<string | null> {
+  if (word.offset === 0 && word.duration === 0) return null;
+  if (word.errorType === "Omission" || word.errorType === "Insertion") return null;
+
+  const startSec = Math.max(0, word.offset / 10_000_000 - 0.15);
+  const durSec = word.duration / 10_000_000 + 0.3;
+
+  const dir = await mkdtemp(join(tmpdir(), "wordaudio-"));
+  const inPath = join(dir, "input.wav");
+  const outPath = join(dir, "output.wav");
+
+  try {
+    await writeFile(inPath, wavBuffer);
+    await new Promise<void>((resolve, reject) => {
+      execFile("ffmpeg", [
+        "-y", "-i", inPath,
+        "-ss", startSec.toFixed(3),
+        "-t", durSec.toFixed(3),
+        "-ar", "16000", "-ac", "1",
+        "-f", "wav", outPath,
+      ], (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    const outBuf = await readFile(outPath);
+    return outBuf.toString("base64");
+  } catch (err) {
+    console.error(`Failed to extract audio for word "${word.word}":`, err);
+    return null;
+  } finally {
+    try { await unlink(inPath); } catch {}
+    try { await unlink(outPath); } catch {}
+    try { const { rmdir } = await import("node:fs/promises"); await rmdir(dir); } catch {}
+  }
 }
 
 async function enrichWordsWithTips(
@@ -181,7 +225,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const enrichedWords = await enrichWordsWithTips(azureWords);
 
-      res.json({ transcript, words: enrichedWords });
+      const wordsNeedingAudio = azureResult.words.filter(
+        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
+      );
+      const audioExtractions = await Promise.all(
+        wordsNeedingAudio.map(async (w) => ({
+          word: w.word.toLowerCase(),
+          audio: await extractWordAudio(wavBuffer, w),
+        }))
+      );
+      const audioMap = new Map<string, string>();
+      for (const a of audioExtractions) {
+        if (a.audio) audioMap.set(a.word, a.audio);
+      }
+
+      const wordsWithAudio = enrichedWords.map(w => ({
+        ...w,
+        userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
+      }));
+
+      res.json({ transcript, words: wordsWithAudio });
     } catch (error) {
       console.error("Error analyzing chunk:", error);
       res.status(500).json({ error: "Failed to analyze chunk" });

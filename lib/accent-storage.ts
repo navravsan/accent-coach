@@ -7,6 +7,7 @@ export interface MispronouncedWord {
   tips: string[];
   problemPart?: string;
   phonetic?: string;
+  userAudio?: string;
 }
 
 const STORAGE_KEY = "accent_mispronounced_words";
@@ -30,7 +31,7 @@ export async function saveMispronouncedWords(words: MispronouncedWord[]): Promis
 }
 
 export async function addMispronouncedWords(
-  newWords: { word: string; score: number; tip: string; problemPart?: string; phonetic?: string }[]
+  newWords: { word: string; score: number; tip: string; problemPart?: string; phonetic?: string; userAudio?: string }[]
 ): Promise<void> {
   const existing = await getMispronouncedWords();
   const wordMap = new Map<string, MispronouncedWord>();
@@ -52,6 +53,7 @@ export async function addMispronouncedWords(
       }
       if (nw.problemPart) current.problemPart = nw.problemPart;
       if (nw.phonetic) current.phonetic = nw.phonetic;
+      if (nw.userAudio) current.userAudio = nw.userAudio;
     } else {
       wordMap.set(key, {
         word: nw.word,
@@ -60,6 +62,7 @@ export async function addMispronouncedWords(
         tips: nw.tip ? [nw.tip] : [],
         problemPart: nw.problemPart || "",
         phonetic: nw.phonetic || "",
+        userAudio: nw.userAudio,
       });
     }
   }
