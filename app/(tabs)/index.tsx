@@ -802,33 +802,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: "center" as const,
   },
-  durationPicker: {
-    flexDirection: "row" as const,
-    gap: 10,
-    marginBottom: 16,
-  },
-  durationOption: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.dark.surface,
-    justifyContent: "center" as const,
-    alignItems: "center" as const,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  durationOptionActive: {
-    borderColor: Colors.dark.accent,
-    backgroundColor: Colors.dark.accentDim,
-  },
-  durationOptionText: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 15,
-    color: Colors.dark.textMuted,
-  },
-  durationOptionTextActive: {
-    color: Colors.dark.accent,
-  },
   micButtonContainer: {
     width: 110,
     height: 110,

@@ -62,8 +62,10 @@ Located in `server/replit_integrations/`, these are modular capabilities:
 ## External Dependencies
 
 ### AI Services
-- **OpenAI API** (via Replit AI Integrations): Powers speech-to-text (Whisper), text-to-speech, chat completions (GPT), and image generation
-- **Environment Variables**: `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- **Azure Speech Services**: Pronunciation Assessment API for real acoustic-level phoneme scoring. Uses REST API (`POST https://{region}.stt.speech.microsoft.com/...`) with WAV PCM 16kHz audio. Located in `server/azure-speech.ts`.
+- **OpenAI API** (via Replit AI Integrations): Powers speech-to-text (Whisper), text-to-speech, chat completions (GPT for enrichment tips/phonetics), and image generation
+- **Environment Variables**: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- **Assessment Flow**: Audio → Whisper transcription → Azure Pronunciation Assessment (acoustic scoring) → OpenAI tips enrichment for low-scoring words
 
 ### Database
 - **PostgreSQL**: Connected via `DATABASE_URL` environment variable, accessed through Drizzle ORM
