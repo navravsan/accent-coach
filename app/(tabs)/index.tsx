@@ -223,9 +223,24 @@ export default function TalkScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      let base64: string;
+      if (Platform.OS === "web") {
+        const resp = await globalThis.fetch(uri);
+        const blob = await resp.blob();
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split(",")[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
 
       const response = await apiRequest("POST", "/api/analyze-speech", { audio: base64 });
       const data: AnalysisResult = await response.json();

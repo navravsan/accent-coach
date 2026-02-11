@@ -223,17 +223,29 @@ export default function PracticeScreen() {
       if (!response.ok) throw new Error("TTS failed");
       const data = await response.json();
 
-      const fileUri = FileSystem.documentDirectory + `tts_${Date.now()}.wav`;
-      await FileSystem.writeAsStringAsync(fileUri, data.audio, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      let audioUri: string;
+      if (Platform.OS === "web") {
+        const byteChars = atob(data.audio);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "audio/wav" });
+        audioUri = URL.createObjectURL(blob);
+      } else {
+        audioUri = FileSystem.documentDirectory + `tts_${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(audioUri, data.audio, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
       });
 
-      const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
       soundRef.current = sound;
 
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -320,9 +332,24 @@ export default function PracticeScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      let base64: string;
+      if (Platform.OS === "web") {
+        const resp = await globalThis.fetch(uri);
+        const blob = await resp.blob();
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split(",")[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
 
       const response = await apiRequest("POST", "/api/assess-word", {
         audio: base64,
