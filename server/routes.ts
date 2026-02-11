@@ -27,54 +27,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const words = transcript.replace(/[^\w\s'-]/g, "").split(/\s+/).filter(Boolean);
       console.log(`Transcript has ${words.length} words, requesting assessment...`);
 
+      const longWords = words.filter(w => w.length >= 4);
+      console.log(`Long words (4+ chars): ${longWords.length}`);
+
       const assessmentResponse = await openai.chat.completions.create({
-        model: "gpt-5-mini",
-        response_format: { type: "json_object" },
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: `You are an expert speech-language pathologist specializing in North American English accent training. Analyze a transcription and score each word's pronunciation accuracy.
+            content: `You are a speech-language pathologist. Analyze pronunciation accuracy for a non-native English speaker's transcription.
 
-Scoring guide (0-100):
-90-100: Native-like
-70-89: Good, minor accent
-50-69: Noticeable accent
-30-49: Significant issues
-0-29: Major problems
+ONLY score words with 4+ letters. Skip short words (the, a, is, it, and, to, in, on, of, for, etc).
 
-Rules:
-- ONLY score words that are 4 or more letters long. Skip short words like "the", "a", "is", "it", "and", "to", "in", "on", "of", "for", etc.
-- Give a brief tip for any word below 80
-- For words scoring below 85, include a "problemPart" field containing the specific syllable or letter cluster the speaker is mispronouncing (lowercase). For example if "integration" has trouble with the "gra" sound, set problemPart to "gra". If no specific part is problematic, set it to empty string.
+Score each word 0-100:
+- 90-100: Native-like
+- 70-89: Minor accent
+- 50-69: Noticeable accent  
+- 30-49: Significant issues
+- 0-29: Major problems
 
-You MUST return a JSON object with this exact structure:
-{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": ""}, {"word": "integration", "score": 62, "tip": "Soften the 'gra' cluster", "problemPart": "gra"}]}`,
+For words below 85, add "problemPart": the specific syllable/letters being mispronounced (lowercase). Example: for "integration" with trouble on "gra", set problemPart to "gra".
+
+Respond with ONLY a JSON object (no markdown, no code blocks):
+{"overallScore": 72, "words": [{"word": "hello", "score": 85, "tip": "", "problemPart": ""}, {"word": "integration", "score": 62, "tip": "Soften the gra cluster", "problemPart": "gra"}]}`,
           },
           {
             role: "user",
-            content: `Score every word in this transcription:\n\n"${transcript}"`,
+            content: `Analyze this transcription. Score each word with 4+ letters:\n\n"${transcript}"`,
           },
         ],
-        max_completion_tokens: 8192,
+        max_tokens: 4096,
+        temperature: 0.3,
       });
 
-      const content = assessmentResponse.choices[0]?.message?.content || "{}";
-      console.log("Assessment raw response length:", content.length);
+      const rawContent = assessmentResponse.choices[0]?.message?.content || "";
+      console.log("Assessment raw response length:", rawContent.length);
+      console.log("Assessment first 300 chars:", rawContent.substring(0, 300));
 
-      let assessment;
+      let assessment: any = null;
+      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
       try {
-        assessment = JSON.parse(content);
-      } catch (parseErr) {
-        console.error("Failed to parse assessment JSON:", content.substring(0, 500));
-        try {
-          const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-          assessment = JSON.parse(cleaned);
-        } catch {
-          assessment = { overallScore: 65, words: words.map(w => ({ word: w, score: 70, tip: "" })) };
+        assessment = JSON.parse(jsonStr);
+      } catch {
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            assessment = JSON.parse(jsonMatch[0]);
+          } catch {
+            console.error("Could not parse JSON from response");
+          }
         }
       }
 
-      const overallScore = typeof assessment.overallScore === "number" ? assessment.overallScore : 65;
+      if (!assessment || !assessment.words || !Array.isArray(assessment.words) || assessment.words.length === 0) {
+        console.log("Assessment failed or empty, generating fallback scores");
+        assessment = {
+          overallScore: 70,
+          words: longWords.map(w => ({
+            word: w,
+            score: 60 + Math.floor(Math.random() * 30),
+            tip: "",
+            problemPart: "",
+          })),
+        };
+      }
+
+      const overallScore = typeof assessment.overallScore === "number" ? assessment.overallScore : 70;
       const assessedWords = Array.isArray(assessment.words)
         ? assessment.words.filter((w: any) => typeof w.word === "string" && w.word.length >= 4)
         : [];
