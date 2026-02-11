@@ -34,10 +34,10 @@ async function enrichWordsWithTips(
       messages: [
         {
           role: "system",
-          content: `You are a North American English pronunciation coach. For each word with a low pronunciation score, provide:
-1. "phonetic": IPA transcription of correct North American pronunciation
+          content: `You are a pronunciation coach specializing in General American English — specifically the accent of a native English speaker born and raised in California, USA. For each word with a low pronunciation score, provide:
+1. "phonetic": IPA transcription reflecting standard Californian/General American pronunciation
 2. "problemPart": the specific syllable/letters likely mispronounced (lowercase)
-3. "tip": a brief, actionable pronunciation tip
+3. "tip": a brief, actionable pronunciation tip referencing how a native Californian speaker would say it
 
 Respond with ONLY a JSON object (no markdown):
 {"words": [{"word": "example", "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable"}]}`,
@@ -275,7 +275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             messages: [
               {
                 role: "system",
-                content: `You are a North American English pronunciation coach. Give brief, actionable feedback for improving the pronunciation of a word. Return ONLY valid JSON: {"feedback": "your tip here"}`,
+                content: `You are a pronunciation coach specializing in General American English — specifically the accent of a native English speaker born and raised in California, USA. Give brief, actionable feedback for improving pronunciation to sound like a native Californian speaker. Return ONLY valid JSON: {"feedback": "your tip here"}`,
               },
               {
                 role: "user",
