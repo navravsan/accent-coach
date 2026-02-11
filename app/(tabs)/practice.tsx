@@ -85,18 +85,22 @@ function HighlightedWord({ word, problemPart, style }: { word: string; problemPa
 function PracticeWordCard({
   item,
   onPlayCorrect,
+  onPlayOriginal,
   onPlayRecording,
   onRecord,
   isPlayingCorrect,
+  isPlayingOriginal,
   isPlayingRecording,
   isRecording,
   latestFeedback,
 }: {
   item: PracticeWord;
   onPlayCorrect: () => void;
+  onPlayOriginal: () => void;
   onPlayRecording: () => void;
   onRecord: () => void;
   isPlayingCorrect: boolean;
+  isPlayingOriginal: boolean;
   isPlayingRecording: boolean;
   isRecording: boolean;
   latestFeedback: PracticeFeedback | null;
@@ -164,6 +168,20 @@ function PracticeWordCard({
             )}
           </Pressable>
 
+          {item.userAudio ? (
+            <Pressable
+              style={({ pressed }) => [cardStyles.actionBtn, pressed && { opacity: 0.7 }]}
+              onPress={onPlayOriginal}
+              disabled={isPlayingOriginal}
+            >
+              {isPlayingOriginal ? (
+                <ActivityIndicator size="small" color={Colors.dark.warning} />
+              ) : (
+                <Ionicons name="ear-outline" size={22} color={Colors.dark.warning} />
+              )}
+            </Pressable>
+          ) : null}
+
           <Animated.View style={pulseStyle}>
             <Pressable
               style={({ pressed }) => [
@@ -229,6 +247,7 @@ export default function PracticeScreen() {
   const [practiceWords, setPracticeWords] = useState<PracticeWord[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingWord, setPlayingWord] = useState<string | null>(null);
+  const [playingOriginal, setPlayingOriginal] = useState<string | null>(null);
   const [playingRecording, setPlayingRecording] = useState<string | null>(null);
   const [recordingWord, setRecordingWord] = useState<string | null>(null);
   const [feedbacks, setFeedbacks] = useState<Record<string, PracticeFeedback>>({});
@@ -327,6 +346,57 @@ export default function PracticeScreen() {
       console.error("TTS error:", err);
       setPlayingWord(null);
       Alert.alert("Error", "Could not play pronunciation.");
+    }
+  };
+
+  const playOriginalAudio = async (word: PracticeWord) => {
+    if (!word.userAudio) return;
+
+    try {
+      setPlayingOriginal(word.word);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      let audioUri: string;
+      if (Platform.OS === "web") {
+        const byteChars = atob(word.userAudio);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "audio/wav" });
+        audioUri = URL.createObjectURL(blob);
+      } else {
+        audioUri = FileSystem.documentDirectory + `original_${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(audioUri, word.userAudio, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
+      soundRef.current = sound;
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingOriginal(null);
+          sound.unloadAsync();
+        }
+      });
+
+      await sound.playAsync();
+    } catch (err) {
+      console.error("Error playing original audio:", err);
+      setPlayingOriginal(null);
     }
   };
 
@@ -563,7 +633,7 @@ export default function PracticeScreen() {
             Top {practiceWords.length} words to improve
           </Text>
           <Text style={styles.instructions}>
-            Tap the speaker to hear correct pronunciation, then tap the microphone to practice
+            Tap the speaker to hear correct pronunciation, the ear to hear how you said it, then the mic to practice
           </Text>
 
           {practiceWords.map((word, index) => (
@@ -571,9 +641,11 @@ export default function PracticeScreen() {
               <PracticeWordCard
                 item={word}
                 onPlayCorrect={() => playWord(word.word)}
+                onPlayOriginal={() => playOriginalAudio(word)}
                 onPlayRecording={() => playUserRecording(word.word)}
                 onRecord={() => handleRecord(word.word)}
                 isPlayingCorrect={playingWord === word.word}
+                isPlayingOriginal={playingOriginal === word.word}
                 isPlayingRecording={playingRecording === word.word}
                 isRecording={recordingWord === word.word}
                 latestFeedback={feedbacks[word.word.toLowerCase()] || null}
