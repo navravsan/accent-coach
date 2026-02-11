@@ -30,7 +30,7 @@ import {
   addSession,
 } from "@/lib/accent-storage";
 
-const MAX_DURATION = 300;
+const DURATION_OPTIONS = [1, 2, 3, 4, 5];
 
 interface WordResult {
   word: string;
@@ -80,6 +80,7 @@ function WordScoreItem({ item }: { item: WordResult }) {
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
   const [state, setState] = useState<ScreenState>("idle");
+  const [selectedMinutes, setSelectedMinutes] = useState(3);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
@@ -173,11 +174,12 @@ export default function TalkScreen() {
         -1
       );
 
+      const maxSecs = selectedMinutes * 60;
       timerRef.current = setInterval(() => {
         setElapsed((prev) => {
-          if (prev >= MAX_DURATION - 1) {
+          if (prev >= maxSecs - 1) {
             stopRecording();
-            return MAX_DURATION;
+            return maxSecs;
           }
           return prev + 1;
         });
@@ -264,7 +266,8 @@ export default function TalkScreen() {
     opacity: ringOpacity.value,
   }));
 
-  const remaining = MAX_DURATION - elapsed;
+  const maxDuration = selectedMinutes * 60;
+  const remaining = maxDuration - elapsed;
 
   if (permission === null) {
     return (
@@ -389,11 +392,38 @@ export default function TalkScreen() {
         ) : (
           <>
             <Text style={styles.timerText}>
-              {state === "recording" ? formatTime(remaining) : "5:00"}
+              {state === "recording" ? formatTime(remaining) : formatTime(selectedMinutes * 60)}
             </Text>
             <Text style={styles.timerLabel}>
               {state === "recording" ? "Recording..." : "Tap to start speaking"}
             </Text>
+
+            {state === "idle" && (
+              <View style={styles.durationPicker}>
+                {DURATION_OPTIONS.map((min) => (
+                  <Pressable
+                    key={min}
+                    style={[
+                      styles.durationOption,
+                      selectedMinutes === min && styles.durationOptionActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedMinutes(min);
+                      Haptics.selectionAsync();
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.durationOptionText,
+                        selectedMinutes === min && styles.durationOptionTextActive,
+                      ]}
+                    >
+                      {min}m
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
 
             <View style={styles.micButtonContainer}>
               <Animated.View style={[styles.pulseRing, ringStyle]} />
@@ -417,7 +447,7 @@ export default function TalkScreen() {
             <Text style={styles.hintText}>
               {state === "recording"
                 ? "Speak naturally about any topic"
-                : "Speak for up to 5 minutes in English"}
+                : "Choose duration, then tap to record"}
             </Text>
           </>
         )}
@@ -460,7 +490,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.dark.textSecondary,
     marginTop: 8,
-    marginBottom: 48,
+    marginBottom: 24,
+  },
+  durationPicker: {
+    flexDirection: "row" as const,
+    gap: 10,
+    marginBottom: 32,
+  },
+  durationOption: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.dark.surface,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  durationOptionActive: {
+    borderColor: Colors.dark.accent,
+    backgroundColor: Colors.dark.accentDim,
+  },
+  durationOptionText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 15,
+    color: Colors.dark.textMuted,
+  },
+  durationOptionTextActive: {
+    color: Colors.dark.accent,
   },
   micButtonContainer: {
     width: 140,
