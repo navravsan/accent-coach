@@ -385,7 +385,7 @@ export default function TalkScreen() {
               <Text style={[styles.scoreCircleNumber, { color: getScoreColor(result.overallScore) }]}>
                 {result.overallScore}
               </Text>
-              <Text style={styles.scoreCirclePercent}>%</Text>
+              <Text style={[styles.scoreCirclePercent, { color: getScoreColor(result.overallScore) }]}>%</Text>
             </View>
             <Text style={styles.scoreLabel}>Overall Accent Score</Text>
           </View>
