@@ -493,6 +493,7 @@ export default function TalkScreen() {
     const sortedWords = dedupedWords.sort((a, b) => a.score - b.score);
     const redWords = sortedWords.filter((w) => w.score < 50);
     const yellowWords = sortedWords.filter((w) => w.score >= 50 && w.score < 85);
+    const excellentWords = sortedWords.filter((w) => w.score >= 95).sort((a, b) => b.score - a.score);
 
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -553,6 +554,25 @@ export default function TalkScreen() {
               <View style={styles.wordsList}>
                 {yellowWords.map((w, i) => (
                   <WordScoreRow key={`${w.word}-${i}`} item={w} showHighlight />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {excellentWords.length > 0 && (
+            <View style={styles.wordsSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="checkmark-circle" size={18} color={Colors.dark.success} />
+                <Text style={[styles.sectionLabel, { color: Colors.dark.success }]}>
+                  Excellent ({excellentWords.length})
+                </Text>
+              </View>
+              <View style={styles.excellentWordsList}>
+                {excellentWords.map((w, i) => (
+                  <View key={`${w.word}-${i}`} style={styles.excellentWordPill}>
+                    <Text style={styles.excellentWordText}>{w.word}</Text>
+                    <Text style={styles.excellentWordScore}>{w.score}%</Text>
+                  </View>
                 ))}
               </View>
             </View>
@@ -974,6 +994,32 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.surface,
     borderRadius: 12,
     overflow: "hidden" as const,
+  },
+  excellentWordsList: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  excellentWordPill: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    backgroundColor: Colors.dark.successDim,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  excellentWordText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: Colors.dark.success,
+    textTransform: "capitalize" as const,
+  },
+  excellentWordScore: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
+    color: Colors.dark.success,
+    opacity: 0.7,
   },
   wordRow: {
     flexDirection: "row" as const,
