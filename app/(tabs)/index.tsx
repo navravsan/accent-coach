@@ -249,7 +249,7 @@ export default function TalkScreen() {
         });
       } else {
         base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: "base64" as any,
         });
       }
 

@@ -301,7 +301,7 @@ export default function PracticeScreen() {
       } else {
         audioUri = FileSystem.documentDirectory + `tts_${Date.now()}.wav`;
         await FileSystem.writeAsStringAsync(audioUri, data.audio, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: "base64" as any,
         });
       }
 
@@ -425,7 +425,7 @@ export default function PracticeScreen() {
         });
       } else {
         base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: "base64" as any,
         });
       }
 
