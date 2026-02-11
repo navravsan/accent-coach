@@ -30,7 +30,6 @@ import {
   addSession,
 } from "@/lib/accent-storage";
 
-const DURATION_OPTIONS = [1, 2, 3];
 const CHUNK_INTERVAL_SECS = 20;
 
 interface WordResult {
@@ -105,7 +104,7 @@ function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
   const [state, setState] = useState<ScreenState>("idle");
-  const [selectedMinutes, setSelectedMinutes] = useState(1);
+  const selectedMinutes = 1;
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
@@ -618,33 +617,7 @@ export default function TalkScreen() {
             </Text>
 
             {state === "idle" && (
-              <>
-                <Text style={styles.timerLabel}>Tap to start speaking</Text>
-                <View style={styles.durationPicker}>
-                  {DURATION_OPTIONS.map((min) => (
-                    <Pressable
-                      key={min}
-                      style={[
-                        styles.durationOption,
-                        selectedMinutes === min && styles.durationOptionActive,
-                      ]}
-                      onPress={() => {
-                        setSelectedMinutes(min);
-                        Haptics.selectionAsync();
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.durationOptionText,
-                          selectedMinutes === min && styles.durationOptionTextActive,
-                        ]}
-                      >
-                        {min}m
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </>
+              <Text style={styles.timerLabel}>Tap to start speaking</Text>
             )}
 
             {state === "recording" && (
