@@ -442,17 +442,16 @@ export default function TalkScreen() {
               </View>
             </View>
           )}
+          <View style={styles.tryAgainContainer}>
+            <Pressable
+              style={({ pressed }) => [styles.tryAgainButton, pressed && { opacity: 0.85 }]}
+              onPress={resetToIdle}
+            >
+              <Ionicons name="refresh" size={20} color="#fff" />
+              <Text style={styles.tryAgainText}>Try Again</Text>
+            </Pressable>
+          </View>
         </ScrollView>
-
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) + (Platform.OS === "web" ? 34 : 0) }]}>
-          <Pressable
-            style={({ pressed }) => [styles.tryAgainButton, pressed && { opacity: 0.85 }]}
-            onPress={resetToIdle}
-          >
-            <Ionicons name="refresh" size={20} color="#fff" />
-            <Text style={styles.tryAgainText}>Try Again</Text>
-          </Pressable>
-        </View>
       </View>
     );
   }
@@ -785,14 +784,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     textDecorationLine: "underline" as const,
   },
-  bottomBar: {
-    position: "absolute" as const,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    backgroundColor: Colors.dark.background,
+  tryAgainContainer: {
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   tryAgainButton: {
     flexDirection: "row" as const,
