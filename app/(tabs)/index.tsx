@@ -30,7 +30,8 @@ import {
   addSession,
 } from "@/lib/accent-storage";
 
-const DURATION_OPTIONS = [1, 2, 3, 4, 5];
+const DURATION_OPTIONS = [1, 2, 3];
+const CHUNK_INTERVAL_SECS = 20;
 
 interface WordResult {
   word: string;
@@ -104,13 +105,20 @@ function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
   const [state, setState] = useState<ScreenState>("idle");
-  const [selectedMinutes, setSelectedMinutes] = useState(3);
+  const [selectedMinutes, setSelectedMinutes] = useState(1);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
+  const [analyzeTotal, setAnalyzeTotal] = useState(1);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkResultsRef = useRef<{ transcript: string; words: WordResult[] }[]>([]);
+  const chunkPendingRef = useRef<Promise<void>[]>([]);
+  const elapsedRef = useRef(0);
+  const stoppingRef = useRef(false);
 
   const pulseScale = useSharedValue(1);
   const ringScale = useSharedValue(1);
@@ -132,6 +140,71 @@ export default function TalkScreen() {
     setPermission(status === "granted");
   };
 
+  const getAudioBase64 = async (uri: string): Promise<string> => {
+    if (Platform.OS === "web") {
+      const resp = await globalThis.fetch(uri);
+      const blob = await resp.blob();
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          resolve(dataUrl.split(",")[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } else {
+      return FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+  };
+
+  const sendChunk = async () => {
+    if (stoppingRef.current) return;
+    const recording = recordingRef.current;
+    if (!recording) return;
+
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      recordingRef.current = null;
+
+      if (uri) {
+        const chunkPromise = (async () => {
+          try {
+            const base64 = await getAudioBase64(uri);
+            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64 });
+            const data = await response.json();
+            if (data.words && data.words.length > 0) {
+              chunkResultsRef.current.push({
+                transcript: data.transcript || "",
+                words: data.words,
+              });
+            }
+          } catch (err) {
+            console.error("Chunk analysis error:", err);
+          }
+          setAnalyzeProgress((p) => p + 1);
+        })();
+        chunkPendingRef.current.push(chunkPromise);
+      }
+
+      if (!stoppingRef.current) {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+        const { recording: newRec } = await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
+        recordingRef.current = newRec;
+      }
+    } catch (err) {
+      console.error("Chunk rotation error:", err);
+    }
+  };
+
   const startRecording = async () => {
     try {
       if (!permission) {
@@ -146,6 +219,13 @@ export default function TalkScreen() {
         } catch (_) {}
         recordingRef.current = null;
       }
+
+      chunkResultsRef.current = [];
+      chunkPendingRef.current = [];
+      stoppingRef.current = false;
+      elapsedRef.current = 0;
+      setAnalyzeProgress(0);
+      setAnalyzeTotal(1);
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -187,14 +267,16 @@ export default function TalkScreen() {
 
       const maxSecs = selectedMinutes * 60;
       timerRef.current = setInterval(() => {
-        setElapsed((prev) => {
-          if (prev >= maxSecs - 1) {
-            stopRecording();
-            return maxSecs;
-          }
-          return prev + 1;
-        });
+        elapsedRef.current += 1;
+        setElapsed(elapsedRef.current);
+        if (elapsedRef.current >= maxSecs) {
+          stopRecording();
+        }
       }, 1000);
+
+      chunkTimerRef.current = setInterval(() => {
+        sendChunk();
+      }, CHUNK_INTERVAL_SECS * 1000);
     } catch (err) {
       console.error("Failed to start recording:", err);
       Alert.alert("Error", "Could not start recording. Please check microphone permissions.");
@@ -202,10 +284,17 @@ export default function TalkScreen() {
   };
 
   const stopRecording = useCallback(async () => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+
     try {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (chunkTimerRef.current) {
+        clearInterval(chunkTimerRef.current);
+        chunkTimerRef.current = null;
       }
 
       cancelAnimation(pulseScale);
@@ -215,57 +304,79 @@ export default function TalkScreen() {
       ringOpacity.value = withTiming(0, { duration: 200 });
 
       const recording = recordingRef.current;
-      if (!recording) return;
+      if (!recording) {
+        setState("idle");
+        return;
+      }
 
-      setState("analyzing");
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       recordingRef.current = null;
 
-      if (!uri) {
-        setState("idle");
-        return;
+      if (uri) {
+        const lastChunk = (async () => {
+          try {
+            const base64 = await getAudioBase64(uri);
+            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64 });
+            const data = await response.json();
+            if (data.words && data.words.length > 0) {
+              chunkResultsRef.current.push({
+                transcript: data.transcript || "",
+                words: data.words,
+              });
+            }
+          } catch (err) {
+            console.error("Last chunk error:", err);
+          }
+          setAnalyzeProgress((p) => p + 1);
+        })();
+        chunkPendingRef.current.push(lastChunk);
       }
+
+      const totalChunks = chunkPendingRef.current.length;
+      setAnalyzeTotal(totalChunks);
+      setState("analyzing");
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
       });
 
-      let base64: string;
-      if (Platform.OS === "web") {
-        const resp = await globalThis.fetch(uri);
-        const blob = await resp.blob();
-        base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const dataUrl = reader.result as string;
-            resolve(dataUrl.split(",")[1]);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      } else {
-        base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+      await Promise.all(chunkPendingRef.current);
+
+      const allTranscripts: string[] = [];
+      const allWords: WordResult[] = [];
+      for (const chunk of chunkResultsRef.current) {
+        if (chunk.transcript) allTranscripts.push(chunk.transcript);
+        allWords.push(...chunk.words);
       }
 
-      const response = await apiRequest("POST", "/api/analyze-speech", { audio: base64 });
-      const data: AnalysisResult = await response.json();
+      const fullTranscript = allTranscripts.join(" ");
 
-      setResult(data);
+      let overallScore = 70;
+      if (allWords.length > 0) {
+        const total = allWords.reduce((sum, w) => sum + (w.score || 0), 0);
+        overallScore = Math.round(total / allWords.length);
+      }
+
+      const analysisResult: AnalysisResult = {
+        overallScore,
+        transcript: fullTranscript,
+        words: allWords,
+      };
+
+      setResult(analysisResult);
       setState("results");
 
-      if (data.words && data.words.length > 0) {
-        await addMispronouncedWords(data.words);
+      if (allWords.length > 0) {
+        await addMispronouncedWords(allWords);
         await addSession({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           date: Date.now(),
-          overallScore: data.overallScore,
-          wordCount: data.words.length,
+          overallScore,
+          wordCount: allWords.length,
         });
       }
 
@@ -281,6 +392,9 @@ export default function TalkScreen() {
     setState("idle");
     setResult(null);
     setElapsed(0);
+    setAnalyzeProgress(0);
+    setAnalyzeTotal(1);
+    stoppingRef.current = false;
   };
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -453,9 +567,25 @@ export default function TalkScreen() {
       <View style={styles.centerContent}>
         {state === "analyzing" ? (
           <View style={styles.analyzingContainer}>
-            <ActivityIndicator size="large" color={Colors.dark.accent} />
+            <View style={styles.progressCircleOuter}>
+              <Text style={styles.progressPercent}>
+                {analyzeTotal > 0 ? Math.round((analyzeProgress / analyzeTotal) * 100) : 0}%
+              </Text>
+            </View>
+            <View style={styles.progressBarContainer}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${analyzeTotal > 0 ? Math.min((analyzeProgress / analyzeTotal) * 100, 100) : 0}%` as any },
+                ]}
+              />
+            </View>
             <Text style={styles.analyzingText}>Analyzing your accent...</Text>
-            <Text style={styles.analyzingSubtext}>This may take a moment</Text>
+            <Text style={styles.analyzingSubtext}>
+              {analyzeProgress < analyzeTotal
+                ? `Processing chunk ${analyzeProgress + 1} of ${analyzeTotal}`
+                : "Finalizing results..."}
+            </Text>
           </View>
         ) : (
           <>
@@ -622,12 +752,41 @@ const styles = StyleSheet.create({
   analyzingContainer: {
     alignItems: "center" as const,
     gap: 16,
+    paddingHorizontal: 32,
+  },
+  progressCircleOuter: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 4,
+    borderColor: Colors.dark.accent,
+    backgroundColor: Colors.dark.surface,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    marginBottom: 8,
+  },
+  progressPercent: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 28,
+    color: Colors.dark.accent,
+  },
+  progressBarContainer: {
+    width: "100%" as const,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.dark.surface,
+    overflow: "hidden" as const,
+  },
+  progressBarFill: {
+    height: "100%" as const,
+    borderRadius: 3,
+    backgroundColor: Colors.dark.accent,
   },
   analyzingText: {
     fontFamily: "Inter_600SemiBold",
     fontSize: 20,
     color: Colors.dark.text,
-    marginTop: 8,
+    marginTop: 4,
   },
   analyzingSubtext: {
     fontFamily: "Inter_400Regular",

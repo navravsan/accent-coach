@@ -113,6 +113,84 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
     }
   });
 
+  app.post("/api/analyze-chunk", async (req: Request, res: Response) => {
+    try {
+      const { audio } = req.body;
+      if (!audio) {
+        return res.status(400).json({ error: "Audio data is required" });
+      }
+
+      const rawBuffer = Buffer.from(audio, "base64");
+      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+
+      const transcript = await speechToText(audioBuffer, inputFormat);
+
+      if (!transcript || transcript.trim().length === 0) {
+        return res.json({ transcript: "", words: [] });
+      }
+
+      const words = transcript.replace(/[^\w\s'-]/g, "").split(/\s+/).filter(Boolean);
+      const longWords = words.filter(w => w.length >= 4);
+
+      if (longWords.length === 0) {
+        return res.json({ transcript, words: [] });
+      }
+
+      const assessmentResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a speech-language pathologist. Analyze pronunciation accuracy for a non-native English speaker's transcription.
+
+ONLY score words with 4+ letters. Skip short words.
+
+Score each word 0-100:
+- 90-100: Native-like
+- 70-89: Minor accent
+- 50-69: Noticeable accent  
+- 30-49: Significant issues
+- 0-29: Major problems
+
+For words below 85, add "problemPart": the specific syllable/letters being mispronounced (lowercase).
+Also include "phonetic": the IPA phonetic transcription.
+
+Respond with ONLY a JSON object (no markdown, no code blocks):
+{"words": [{"word": "hello", "score": 85, "tip": "", "problemPart": "", "phonetic": "/həˈloʊ/"}]}`,
+          },
+          {
+            role: "user",
+            content: `Analyze this transcription. Score each word with 4+ letters:\n\n"${transcript}"`,
+          },
+        ],
+        max_tokens: 2048,
+        temperature: 0.3,
+      });
+
+      const rawContent = assessmentResponse.choices[0]?.message?.content || "";
+      let assessment: any = null;
+      const jsonStr = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+      try {
+        assessment = JSON.parse(jsonStr);
+      } catch {
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            assessment = JSON.parse(jsonMatch[0]);
+          } catch {}
+        }
+      }
+
+      const assessedWords = assessment?.words?.filter((w: any) => typeof w.word === "string" && w.word.length >= 4) || [];
+
+      res.json({ transcript, words: assessedWords });
+    } catch (error) {
+      console.error("Error analyzing chunk:", error);
+      res.status(500).json({ error: "Failed to analyze chunk" });
+    }
+  });
+
   app.post("/api/tts", async (req: Request, res: Response) => {
     try {
       const { word } = req.body;
