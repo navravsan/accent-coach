@@ -218,14 +218,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const enrichedWords = await enrichWordsWithTips(azureWords);
 
+      const wordsNeedingAudio = azureResult.words.filter(
+        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
+      );
+      const audioExtractions = await Promise.all(
+        wordsNeedingAudio.map(async (w) => ({
+          word: w.word.toLowerCase(),
+          audio: await extractWordAudio(wavBuffer, w),
+        }))
+      );
+      const audioMap = new Map<string, string>();
+      for (const a of audioExtractions) {
+        if (a.audio) audioMap.set(a.word, a.audio);
+      }
+
+      const wordsWithAudio = enrichedWords.map(w => ({
+        ...w,
+        userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
+      }));
+
       const overallScore = Math.round(azureResult.pronScore);
 
-      console.log(`[Result] overallScore=${overallScore}, words=${enrichedWords.length}`);
+      console.log(`[Result] overallScore=${overallScore}, words=${wordsWithAudio.length}`);
 
       res.json({
         overallScore,
         transcript,
-        words: enrichedWords,
+        words: wordsWithAudio,
       });
     } catch (error) {
       console.error("Error analyzing speech:", error);
