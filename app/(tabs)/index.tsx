@@ -30,8 +30,6 @@ import {
   addSession,
 } from "@/lib/accent-storage";
 
-const CHUNK_INTERVAL_SECS = 20;
-
 interface WordResult {
   word: string;
   score: number;
@@ -110,8 +108,6 @@ export default function TalkScreen() {
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [permission, setPermission] = useState<boolean | null>(null);
-  const [analyzeProgress, setAnalyzeProgress] = useState(0);
-  const [analyzeTotal, setAnalyzeTotal] = useState(1);
   const [article, setArticle] = useState<{ title: string; body: string } | null>(null);
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleExpanded, setArticleExpanded] = useState(false);
@@ -119,9 +115,6 @@ export default function TalkScreen() {
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chunkResultsRef = useRef<{ transcript: string; words: WordResult[] }[]>([]);
-  const chunkPendingRef = useRef<Promise<void>[]>([]);
   const elapsedRef = useRef(0);
   const stoppingRef = useRef(false);
 
@@ -188,52 +181,6 @@ export default function TalkScreen() {
     }
   };
 
-  const sendChunk = async () => {
-    if (stoppingRef.current) return;
-    const recording = recordingRef.current;
-    if (!recording) return;
-
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      recordingRef.current = null;
-
-      if (uri) {
-        const chunkPromise = (async () => {
-          try {
-            const base64 = await getAudioBase64(uri);
-            const articleText = article ? `${article.title}\n${article.body}` : "";
-            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64, referenceText: articleText });
-            const data = await response.json();
-            if (data.words && data.words.length > 0) {
-              chunkResultsRef.current.push({
-                transcript: data.transcript || "",
-                words: data.words,
-              });
-            }
-          } catch (err) {
-            console.error("Chunk analysis error:", err);
-          }
-          setAnalyzeProgress((p) => p + 1);
-        })();
-        chunkPendingRef.current.push(chunkPromise);
-      }
-
-      if (!stoppingRef.current) {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-        const { recording: newRec } = await Audio.Recording.createAsync(
-          Audio.RecordingOptionsPresets.HIGH_QUALITY
-        );
-        recordingRef.current = newRec;
-      }
-    } catch (err) {
-      console.error("Chunk rotation error:", err);
-    }
-  };
-
   const startRecording = async () => {
     try {
       if (!permission) {
@@ -249,12 +196,8 @@ export default function TalkScreen() {
         recordingRef.current = null;
       }
 
-      chunkResultsRef.current = [];
-      chunkPendingRef.current = [];
       stoppingRef.current = false;
       elapsedRef.current = 0;
-      setAnalyzeProgress(0);
-      setAnalyzeTotal(1);
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -303,9 +246,6 @@ export default function TalkScreen() {
         }
       }, 1000);
 
-      chunkTimerRef.current = setInterval(() => {
-        sendChunk();
-      }, CHUNK_INTERVAL_SECS * 1000);
     } catch (err) {
       console.error("Failed to start recording:", err);
       Alert.alert("Error", "Could not start recording. Please check microphone permissions.");
@@ -320,10 +260,6 @@ export default function TalkScreen() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
-      }
-      if (chunkTimerRef.current) {
-        clearInterval(chunkTimerRef.current);
-        chunkTimerRef.current = null;
       }
 
       cancelAnimation(pulseScale);
@@ -344,30 +280,6 @@ export default function TalkScreen() {
       const uri = recording.getURI();
       recordingRef.current = null;
 
-      if (uri) {
-        const lastChunk = (async () => {
-          try {
-            const base64 = await getAudioBase64(uri);
-            const currentArticle = articleRef.current;
-            const articleText = currentArticle ? `${currentArticle.title}\n${currentArticle.body}` : "";
-            const response = await apiRequest("POST", "/api/analyze-chunk", { audio: base64, referenceText: articleText });
-            const data = await response.json();
-            if (data.words && data.words.length > 0) {
-              chunkResultsRef.current.push({
-                transcript: data.transcript || "",
-                words: data.words,
-              });
-            }
-          } catch (err) {
-            console.error("Last chunk error:", err);
-          }
-          setAnalyzeProgress((p) => p + 1);
-        })();
-        chunkPendingRef.current.push(lastChunk);
-      }
-
-      const totalChunks = chunkPendingRef.current.length;
-      setAnalyzeTotal(totalChunks);
       setState("analyzing");
 
       await Audio.setAudioModeAsync({
@@ -375,39 +287,37 @@ export default function TalkScreen() {
         playsInSilentModeIOS: true,
       });
 
-      await Promise.all(chunkPendingRef.current);
-
-      const allTranscripts: string[] = [];
-      const allWords: WordResult[] = [];
-      for (const chunk of chunkResultsRef.current) {
-        if (chunk.transcript) allTranscripts.push(chunk.transcript);
-        allWords.push(...chunk.words);
+      if (!uri) {
+        setState("idle");
+        return;
       }
 
-      const fullTranscript = allTranscripts.join(" ");
+      const base64 = await getAudioBase64(uri);
+      const currentArticle = articleRef.current;
+      const articleText = currentArticle ? `${currentArticle.title}\n${currentArticle.body}` : "";
 
-      let overallScore = 70;
-      if (allWords.length > 0) {
-        const total = allWords.reduce((sum, w) => sum + (w.score || 0), 0);
-        overallScore = Math.round(total / allWords.length);
-      }
+      const response = await apiRequest("POST", "/api/analyze-speech", {
+        audio: base64,
+        referenceText: articleText,
+      });
+      const data = await response.json();
 
       const analysisResult: AnalysisResult = {
-        overallScore,
-        transcript: fullTranscript,
-        words: allWords,
+        overallScore: data.overallScore || 0,
+        transcript: data.transcript || "",
+        words: data.words || [],
       };
 
       setResult(analysisResult);
       setState("results");
 
-      if (allWords.length > 0) {
-        await addMispronouncedWords(allWords);
+      if (analysisResult.words.length > 0) {
+        await addMispronouncedWords(analysisResult.words);
         await addSession({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           date: Date.now(),
-          overallScore,
-          wordCount: allWords.length,
+          overallScore: analysisResult.overallScore,
+          wordCount: analysisResult.words.length,
         });
       }
 
@@ -602,24 +512,10 @@ export default function TalkScreen() {
       {state === "analyzing" ? (
         <View style={styles.centerContent}>
           <View style={styles.analyzingContainer}>
-            <View style={styles.progressCircleOuter}>
-              <Text style={styles.progressPercent}>
-                {analyzeTotal > 0 ? Math.round((analyzeProgress / analyzeTotal) * 100) : 0}%
-              </Text>
-            </View>
-            <View style={styles.progressBarContainer}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  { width: `${analyzeTotal > 0 ? Math.min((analyzeProgress / analyzeTotal) * 100, 100) : 0}%` as any },
-                ]}
-              />
-            </View>
+            <ActivityIndicator size="large" color={Colors.dark.accent} />
             <Text style={styles.analyzingText}>Analyzing your accent...</Text>
             <Text style={styles.analyzingSubtext}>
-              {analyzeProgress < analyzeTotal
-                ? `Processing chunk ${analyzeProgress + 1} of ${analyzeTotal}`
-                : "Finalizing results..."}
+              This may take a moment
             </Text>
           </View>
         </View>
