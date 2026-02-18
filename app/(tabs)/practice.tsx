@@ -548,10 +548,14 @@ export default function PracticeScreen() {
           text: "Clear All",
           style: "destructive",
           onPress: async () => {
-            await clearAllWords();
-            setFeedbacks({});
-            await loadWords();
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            try {
+              await clearAllWords();
+              setFeedbacks({});
+              setPracticeWords([]);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (err) {
+              console.error("Clear all error:", err);
+            }
           },
         },
       ]
@@ -568,10 +572,14 @@ export default function PracticeScreen() {
           text: "Clear",
           style: "destructive",
           onPress: async () => {
-            await clearLastSessionWords();
-            setFeedbacks({});
-            await loadWords();
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            try {
+              await clearLastSessionWords();
+              setFeedbacks({});
+              await loadWords();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (err) {
+              console.error("Clear last session error:", err);
+            }
           },
         },
       ]

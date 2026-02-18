@@ -123,6 +123,7 @@ export async function removeWord(word: string): Promise<void> {
 
 export async function clearAllWords(): Promise<void> {
   await saveMispronouncedWords([]);
+  await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
 }
 
 export async function clearLastSessionWords(): Promise<void> {
@@ -130,7 +131,9 @@ export async function clearLastSessionWords(): Promise<void> {
   if (sessions.length === 0) return;
   const lastSession = sessions[0];
   const words = await getMispronouncedWords();
-  const cutoff = lastSession.date - 5000;
-  const filtered = words.filter((w) => w.lastSeen < cutoff);
+  const prevSessionDate = sessions.length > 1 ? sessions[1].date : 0;
+  const filtered = words.filter((w) => w.lastSeen < prevSessionDate || w.lastSeen > lastSession.date + 10000);
   await saveMispronouncedWords(filtered);
+  const remainingSessions = sessions.slice(1);
+  await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(remainingSessions));
 }

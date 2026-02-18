@@ -333,8 +333,6 @@ export default function TalkScreen() {
     setState("idle");
     setResult(null);
     setElapsed(0);
-    setAnalyzeProgress(0);
-    setAnalyzeTotal(1);
     stoppingRef.current = false;
   };
 
