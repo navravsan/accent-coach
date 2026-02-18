@@ -210,16 +210,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
 
-      const azureWords = azureResult.words.map(w => ({
-        word: w.word,
-        score: w.accuracyScore,
-        errorType: w.errorType,
-      }));
+      const zeroWords = azureResult.words.filter(w => w.accuracyScore === 0);
+      if (zeroWords.length > 0) {
+        console.log(`[Azure] ${zeroWords.length} words with 0% score:`, zeroWords.map(w => `${w.word}(${w.errorType})`).join(", "));
+      }
+
+      const azureWords = azureResult.words
+        .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
+        .map(w => ({
+          word: w.word,
+          score: w.accuracyScore,
+          errorType: w.errorType,
+        }));
 
       const enrichedWords = await enrichWordsWithTips(azureWords);
 
       const wordsNeedingAudio = azureResult.words.filter(
-        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
+        w => w.word.length >= 4 && w.accuracyScore > 0 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
       );
       const audioExtractions = await Promise.all(
         wordsNeedingAudio.map(async (w) => ({
@@ -237,7 +244,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
       }));
 
-      const overallScore = Math.round(azureResult.pronScore);
+      const scoredWords = azureResult.words.filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0);
+      const overallScore = scoredWords.length > 0
+        ? Math.round(scoredWords.reduce((sum, w) => sum + w.accuracyScore, 0) / scoredWords.length)
+        : Math.round(azureResult.pronScore);
 
       console.log(`[Result] overallScore=${overallScore}, words=${wordsWithAudio.length}`);
 
@@ -286,16 +296,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const azureResult = await assessPronunciation(wavBuffer, azureRef);
       console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
 
-      const azureWords = azureResult.words.map(w => ({
-        word: w.word,
-        score: w.accuracyScore,
-        errorType: w.errorType,
-      }));
+      const azureWords = azureResult.words
+        .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
+        .map(w => ({
+          word: w.word,
+          score: w.accuracyScore,
+          errorType: w.errorType,
+        }));
 
       const enrichedWords = await enrichWordsWithTips(azureWords);
 
       const wordsNeedingAudio = azureResult.words.filter(
-        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
+        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0
       );
       const audioExtractions = await Promise.all(
         wordsNeedingAudio.map(async (w) => ({
