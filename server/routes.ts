@@ -24,17 +24,23 @@ function findMatchingArticleSection(transcript: string, fullArticle: string): st
 
   if (transcriptWords.length === 0 || articleWords.length === 0) return transcript;
 
-  const windowSize = Math.min(transcriptWords.length + 10, articleWords.length);
+  const windowSize = Math.min(transcriptWords.length, articleWords.length);
   let bestStart = 0;
   let bestScore = -1;
 
   for (let start = 0; start <= articleWords.length - Math.min(windowSize, articleWords.length); start++) {
     let score = 0;
     const end = Math.min(start + windowSize, articleWords.length);
-    const windowSet = new Set(articleNorm.slice(start, end));
+    const windowNorm = articleNorm.slice(start, end);
 
-    for (const tw of transcriptWords) {
-      if (tw.length >= 3 && windowSet.has(tw)) score++;
+    let tIdx = 0;
+    for (let aIdx = 0; aIdx < windowNorm.length && tIdx < transcriptWords.length; aIdx++) {
+      if (windowNorm[aIdx] === transcriptWords[tIdx] || 
+          (windowNorm[aIdx].length >= 4 && transcriptWords[tIdx].length >= 4 && 
+           windowNorm[aIdx].slice(0, 4) === transcriptWords[tIdx].slice(0, 4))) {
+        score++;
+        tIdx++;
+      }
     }
 
     if (score > bestScore) {
@@ -43,12 +49,11 @@ function findMatchingArticleSection(transcript: string, fullArticle: string): st
     }
   }
 
-  const padding = 5;
-  const sliceStart = Math.max(0, bestStart - padding);
-  const sliceEnd = Math.min(articleWords.length, bestStart + windowSize + padding);
+  const sliceStart = bestStart;
+  const sliceEnd = Math.min(articleWords.length, bestStart + windowSize);
   const matched = articleWords.slice(sliceStart, sliceEnd).join(" ");
 
-  console.log(`[Reference Match] transcript=${transcriptWords.length} words, matched article section starting at word ${bestStart} (score=${bestScore}/${transcriptWords.length})`);
+  console.log(`[Reference Match] transcript=${transcriptWords.length} words, matched article[${sliceStart}:${sliceEnd}] = ${sliceEnd - sliceStart} words (sequential match=${bestScore}/${transcriptWords.length})`);
 
   return matched;
 }
