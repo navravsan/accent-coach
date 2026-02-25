@@ -538,52 +538,60 @@ export default function PracticeScreen() {
     }
   };
 
+  const doClearAll = async () => {
+    try {
+      await clearAllWords();
+      setFeedbacks({});
+      setPracticeWords([]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error("Clear all error:", err);
+    }
+  };
+
+  const doClearLastSession = async () => {
+    try {
+      await clearLastSessionWords();
+      setFeedbacks({});
+      await loadWords();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error("Clear last session error:", err);
+    }
+  };
+
   const handleClearAll = () => {
-    Alert.alert(
-      "Clear All Words",
-      "This will remove all practice words. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear All",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await clearAllWords();
-              setFeedbacks({});
-              setPracticeWords([]);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (err) {
-              console.error("Clear all error:", err);
-            }
-          },
-        },
-      ]
-    );
+    if (Platform.OS === "web") {
+      if (window.confirm("This will remove all practice words. This cannot be undone.")) {
+        doClearAll();
+      }
+    } else {
+      Alert.alert(
+        "Clear All Words",
+        "This will remove all practice words. This cannot be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Clear All", style: "destructive", onPress: doClearAll },
+        ]
+      );
+    }
   };
 
   const handleClearLastSession = () => {
-    Alert.alert(
-      "Clear Last Session",
-      "This will remove all words from your most recent recording session.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await clearLastSessionWords();
-              setFeedbacks({});
-              await loadWords();
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (err) {
-              console.error("Clear last session error:", err);
-            }
-          },
-        },
-      ]
-    );
+    if (Platform.OS === "web") {
+      if (window.confirm("This will remove all words from your most recent recording session.")) {
+        doClearLastSession();
+      }
+    } else {
+      Alert.alert(
+        "Clear Last Session",
+        "This will remove all words from your most recent recording session.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Clear", style: "destructive", onPress: doClearLastSession },
+        ]
+      );
+    }
   };
 
   if (loading) {
