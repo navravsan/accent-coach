@@ -114,7 +114,9 @@ export default function TalkScreen() {
   const articleRef = useRef<{ title: string; body: string } | null>(null);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isTtsLoading, setIsTtsLoading] = useState(false);
   const speakerSoundRef = useRef<Audio.Sound | null>(null);
+  const ttsCache = useRef<{ text: string; audio: string } | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -170,6 +172,26 @@ export default function TalkScreen() {
     }
   };
 
+  const prefetchTts = useCallback(async (articleData: { title: string; body: string }) => {
+    const text = `${articleData.title}. ${articleData.body}`;
+    if (ttsCache.current?.text === text) return;
+    try {
+      const response = await apiRequest("POST", "/api/tts", { word: text }, { timeoutMs: 120000 });
+      const data = await response.json();
+      if (data.audio) {
+        ttsCache.current = { text, audio: data.audio };
+      }
+    } catch (err) {
+      console.error("TTS prefetch error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (article) {
+      prefetchTts(article);
+    }
+  }, [article, prefetchTts]);
+
   const stopSpeaking = useCallback(async () => {
     if (speakerSoundRef.current) {
       try {
@@ -179,23 +201,35 @@ export default function TalkScreen() {
       speakerSoundRef.current = null;
     }
     setIsSpeaking(false);
+    setIsTtsLoading(false);
   }, []);
 
   const speakArticle = useCallback(async () => {
-    if (isSpeaking) {
+    if (isSpeaking || isTtsLoading) {
       await stopSpeaking();
       return;
     }
     if (!article) return;
 
     try {
-      setIsSpeaking(true);
-      const text = `${article.title}. ${article.body}`;
-      const response = await apiRequest("POST", "/api/tts", { word: text }, { timeoutMs: 120000 });
-      const data = await response.json();
+      setIsTtsLoading(true);
 
-      if (!data.audio) {
-        setIsSpeaking(false);
+      const text = `${article.title}. ${article.body}`;
+      let audioBase64: string | null = null;
+
+      if (ttsCache.current?.text === text) {
+        audioBase64 = ttsCache.current.audio;
+      } else {
+        const response = await apiRequest("POST", "/api/tts", { word: text }, { timeoutMs: 120000 });
+        const data = await response.json();
+        audioBase64 = data.audio || null;
+        if (audioBase64) {
+          ttsCache.current = { text, audio: audioBase64 };
+        }
+      }
+
+      if (!audioBase64) {
+        setIsTtsLoading(false);
         return;
       }
 
@@ -206,10 +240,10 @@ export default function TalkScreen() {
 
       let uri: string;
       if (Platform.OS === "web") {
-        uri = `data:audio/wav;base64,${data.audio}`;
+        uri = `data:audio/wav;base64,${audioBase64}`;
       } else {
         const filePath = `${FileSystem.cacheDirectory}article_tts.wav`;
-        await FileSystem.writeAsStringAsync(filePath, data.audio, {
+        await FileSystem.writeAsStringAsync(filePath, audioBase64, {
           encoding: FileSystem.EncodingType.Base64,
         });
         uri = filePath;
@@ -217,6 +251,8 @@ export default function TalkScreen() {
 
       const { sound } = await Audio.Sound.createAsync({ uri });
       speakerSoundRef.current = sound;
+      setIsSpeaking(true);
+      setIsTtsLoading(false);
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
           setIsSpeaking(false);
@@ -228,8 +264,9 @@ export default function TalkScreen() {
     } catch (err) {
       console.error("TTS error:", err);
       setIsSpeaking(false);
+      setIsTtsLoading(false);
     }
-  }, [article, isSpeaking, stopSpeaking]);
+  }, [article, isSpeaking, isTtsLoading, stopSpeaking]);
 
   const getAudioBase64 = async (uri: string): Promise<string> => {
     if (Platform.OS === "web") {
@@ -611,44 +648,24 @@ export default function TalkScreen() {
               </View>
             )}
 
-            <View style={styles.buttonsRow}>
-              <Pressable
-                style={[
-                  styles.speakerButton,
-                  isSpeaking && styles.speakerButtonActive,
-                  (!article || state === "recording") && { opacity: 0.3 },
-                ]}
-                onPress={speakArticle}
-                disabled={!article || state === "recording"}
-              >
-                <Ionicons
-                  name={isSpeaking ? "stop" : "volume-high"}
-                  size={24}
-                  color={isSpeaking ? "#fff" : Colors.dark.accent}
-                />
-              </Pressable>
-
-              <View style={styles.micButtonContainer}>
-                <Animated.View style={[styles.pulseRing, ringStyle]} />
-                <Animated.View style={pulseStyle}>
-                  <Pressable
-                    style={[
-                      styles.micButton,
-                      state === "recording" && styles.micButtonRecording,
-                    ]}
-                    onPress={state === "recording" ? stopRecording : startRecording}
-                    disabled={isSpeaking}
-                  >
-                    <Ionicons
-                      name={state === "recording" ? "stop" : "mic"}
-                      size={36}
-                      color="#fff"
-                    />
-                  </Pressable>
-                </Animated.View>
-              </View>
-
-              <View style={{ width: 52 }} />
+            <View style={styles.micButtonContainer}>
+              <Animated.View style={[styles.pulseRing, ringStyle]} />
+              <Animated.View style={pulseStyle}>
+                <Pressable
+                  style={[
+                    styles.micButton,
+                    state === "recording" && styles.micButtonRecording,
+                  ]}
+                  onPress={state === "recording" ? stopRecording : startRecording}
+                  disabled={isSpeaking}
+                >
+                  <Ionicons
+                    name={state === "recording" ? "stop" : "mic"}
+                    size={36}
+                    color="#fff"
+                  />
+                </Pressable>
+              </Animated.View>
             </View>
 
             {state === "recording" && (
@@ -673,17 +690,40 @@ export default function TalkScreen() {
                     <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
                     <Text style={styles.articleHeaderLabel}>Reading Practice</Text>
                   </View>
-                  <Pressable
-                    onPress={fetchArticle}
-                    hitSlop={12}
-                    style={({ pressed }) => [pressed && { opacity: 0.6 }]}
-                  >
-                    {articleLoading ? (
-                      <ActivityIndicator size="small" color={Colors.dark.textMuted} />
-                    ) : (
-                      <Ionicons name="refresh" size={18} color={Colors.dark.textMuted} />
-                    )}
-                  </Pressable>
+                  <View style={styles.articleHeaderRight}>
+                    <Pressable
+                      onPress={speakArticle}
+                      hitSlop={12}
+                      disabled={!article}
+                      style={({ pressed }) => [
+                        styles.speakerButton,
+                        (isSpeaking || isTtsLoading) && styles.speakerButtonActive,
+                        !article && { opacity: 0.3 },
+                        pressed && { opacity: 0.6 },
+                      ]}
+                    >
+                      {isTtsLoading && !isSpeaking ? (
+                        <ActivityIndicator size="small" color={Colors.dark.accent} />
+                      ) : (
+                        <Ionicons
+                          name={(isSpeaking || isTtsLoading) ? "stop" : "volume-high"}
+                          size={18}
+                          color={(isSpeaking || isTtsLoading) ? "#fff" : Colors.dark.accent}
+                        />
+                      )}
+                    </Pressable>
+                    <Pressable
+                      onPress={fetchArticle}
+                      hitSlop={12}
+                      style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+                    >
+                      {articleLoading ? (
+                        <ActivityIndicator size="small" color={Colors.dark.textMuted} />
+                      ) : (
+                        <Ionicons name="refresh" size={18} color={Colors.dark.textMuted} />
+                      )}
+                    </Pressable>
+                  </View>
                 </View>
 
                 {article ? (
@@ -801,17 +841,16 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: "center" as const,
   },
-  buttonsRow: {
+  articleHeaderRight: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    justifyContent: "center" as const,
-    gap: 20,
+    gap: 12,
   },
   speakerButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
     borderColor: Colors.dark.accent,
     justifyContent: "center" as const,
     alignItems: "center" as const,
@@ -819,6 +858,7 @@ const styles = StyleSheet.create({
   },
   speakerButtonActive: {
     backgroundColor: Colors.dark.accent,
+    borderColor: Colors.dark.accent,
   },
   micButtonContainer: {
     width: 110,
