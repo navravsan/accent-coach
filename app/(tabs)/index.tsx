@@ -511,9 +511,9 @@ export default function TalkScreen() {
         <View style={styles.centerContent}>
           <View style={styles.analyzingContainer}>
             <ActivityIndicator size="large" color={Colors.dark.accent} />
-            <Text style={styles.analyzingText}>Analyzing your accent...</Text>
+            <Text style={styles.analyzingText}>Analyzing accent</Text>
             <Text style={styles.analyzingSubtext}>
-              This may take a moment
+              Score is loading
             </Text>
           </View>
         </View>
