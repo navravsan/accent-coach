@@ -15,7 +15,8 @@ Preferred communication style: Simple, everyday language.
 - **Framework**: Expo SDK 54 with expo-router for file-based routing
 - **Navigation**: Tab-based layout with two tabs — "Talk" (index) for recording/analysis and "Practice" for drilling weak words
 - **State Management**: TanStack React Query for server state; local component state with React hooks
-- **Local Storage**: AsyncStorage for persisting mispronounced words and session history (no user accounts needed for this data)
+- **Auth**: JWT-based email/password auth. Token stored in `expo-secure-store` (native) or `localStorage` (web). `AuthProvider` in `contexts/AuthContext.tsx` provides `user`, `token`, `login`, `register`, `logout` globally. `AuthModal` slides up during accent analysis for just-in-time account creation.
+- **Local Storage**: AsyncStorage for persisting mispronounced words and session history locally. Cloud sync via `/api/user/words` and `/api/user/sessions` when logged in.
 - **Fonts**: Inter font family loaded via `@expo-google-fonts/inter`
 - **Animations**: react-native-reanimated for recording animations and UI transitions
 - **Audio Recording**: expo-av for microphone access and recording

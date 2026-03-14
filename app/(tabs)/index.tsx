@@ -29,6 +29,9 @@ import {
   addMispronouncedWords,
   addSession,
 } from "@/lib/accent-storage";
+import { useAuth } from "@/contexts/AuthContext";
+import AuthModal from "@/components/AuthModal";
+import { syncLocalDataToCloud, saveSessionToCloud, saveWordsToCloud, getCloudSessions } from "@/lib/cloud-sync";
 
 interface WordResult {
   word: string;
@@ -103,6 +106,7 @@ function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight
 
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
+  const { user, token } = useAuth();
   const [state, setState] = useState<ScreenState>("idle");
   const selectedMinutes = 1;
   const [elapsed, setElapsed] = useState(0);
@@ -112,6 +116,9 @@ export default function TalkScreen() {
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleExpanded, setArticleExpanded] = useState(false);
   const articleRef = useRef<{ title: string; body: string } | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [lastSessionScore, setLastSessionScore] = useState<number | null>(null);
+  const pendingResultRef = useRef<AnalysisResult | null>(null);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isTtsLoading, setIsTtsLoading] = useState(false);
@@ -143,6 +150,20 @@ export default function TalkScreen() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (user && token) {
+      getCloudSessions(token).then((sessions) => {
+        if (sessions.length > 0) {
+          const sorted = [...sessions].sort((a: any, b: any) => b.date - a.date);
+          setLastSessionScore(sorted[0].overallScore);
+        }
+      });
+      syncLocalDataToCloud(token).catch(() => {});
+    } else {
+      setLastSessionScore(null);
+    }
+  }, [user, token]);
 
   const checkPermission = async () => {
     const { status } = await Audio.getPermissionsAsync();
@@ -389,6 +410,10 @@ export default function TalkScreen() {
 
       setState("analyzing");
 
+      if (!user) {
+        setShowAuthModal(true);
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -396,6 +421,7 @@ export default function TalkScreen() {
 
       if (!uri) {
         setState("idle");
+        setShowAuthModal(false);
         return;
       }
 
@@ -406,7 +432,7 @@ export default function TalkScreen() {
       const response = await apiRequest("POST", "/api/analyze-speech", {
         audio: base64,
         referenceText: articleText,
-      });
+      }, { timeoutMs: 120000 });
       const data = await response.json();
 
       const analysisResult: AnalysisResult = {
@@ -415,17 +441,41 @@ export default function TalkScreen() {
         words: data.words || [],
       };
 
+      pendingResultRef.current = analysisResult;
+      setShowAuthModal(false);
       setResult(analysisResult);
       setState("results");
 
       if (analysisResult.words.length > 0) {
+        const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        const sessionDate = Date.now();
         await addMispronouncedWords(analysisResult.words);
         await addSession({
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-          date: Date.now(),
+          id: sessionId,
+          date: sessionDate,
           overallScore: analysisResult.overallScore,
           wordCount: analysisResult.words.length,
         });
+
+        const currentToken = token;
+        if (currentToken) {
+          saveWordsToCloud(currentToken, analysisResult.words.map(w => ({
+            word: w.word,
+            scores: [w.score],
+            lastSeen: sessionDate,
+            tips: w.tip ? [w.tip] : [],
+            problemPart: w.problemPart,
+            phonetic: w.phonetic,
+          }))).catch(() => {});
+          saveSessionToCloud(currentToken, {
+            id: sessionId,
+            date: sessionDate,
+            overallScore: analysisResult.overallScore,
+            wordCount: analysisResult.words.length,
+          }).then(() => {
+            setLastSessionScore(analysisResult.overallScore);
+          }).catch(() => {});
+        }
       }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -607,11 +657,33 @@ export default function TalkScreen() {
     );
   }
 
+  const handleAuthSuccess = useCallback(() => {
+    setShowAuthModal(false);
+    if (token) {
+      syncLocalDataToCloud(token).catch(() => {});
+    }
+  }, [token]);
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
+      <AuthModal
+        visible={showAuthModal}
+        onDismiss={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
+        scorePreview={state === "analyzing" ? undefined : result?.overallScore}
+      />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Talk Mode</Text>
-        <View style={{ width: 28 }} />
+        {user ? (
+          <View style={styles.userBadge}>
+            <Ionicons name="person-circle-outline" size={20} color={Colors.dark.accent} />
+          </View>
+        ) : (
+          <Pressable onPress={() => setShowAuthModal(true)} hitSlop={12}>
+            <Text style={styles.signInLink}>Sign In</Text>
+          </Pressable>
+        )}
       </View>
 
       {state === "analyzing" ? (
@@ -683,6 +755,21 @@ export default function TalkScreen() {
             ]}
             showsVerticalScrollIndicator={false}
           >
+            {state === "idle" && user && lastSessionScore !== null && (
+              <View style={styles.returningBanner}>
+                <View style={styles.returningBannerLeft}>
+                  <Ionicons name="trending-up" size={20} color={Colors.dark.success} />
+                  <View>
+                    <Text style={styles.returningBannerTitle}>Welcome back!</Text>
+                    <Text style={styles.returningBannerSub}>Last score: {lastSessionScore}% — beat it today!</Text>
+                  </View>
+                </View>
+                <View style={[styles.returningScoreBadge, { backgroundColor: lastSessionScore >= 85 ? Colors.dark.successDim : lastSessionScore >= 50 ? Colors.dark.warningDim : Colors.dark.errorDim }]}>
+                  <Text style={[styles.returningScoreText, { color: lastSessionScore >= 85 ? Colors.dark.success : lastSessionScore >= 50 ? Colors.dark.warning : Colors.dark.error }]}>{lastSessionScore}%</Text>
+                </View>
+              </View>
+            )}
+
             {state === "idle" && (
               <View style={styles.articleSection}>
                 <View style={styles.articleHeader}>
@@ -782,6 +869,54 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     fontSize: 22,
     color: Colors.dark.text,
+  },
+  userBadge: {
+    width: 28,
+    height: 28,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+  },
+  signInLink: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+    color: Colors.dark.accent,
+  },
+  returningBanner: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+  },
+  returningBannerLeft: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    flex: 1,
+  },
+  returningBannerTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: Colors.dark.text,
+  },
+  returningBannerSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: Colors.dark.textMuted,
+    marginTop: 2,
+  },
+  returningScoreBadge: {
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  returningScoreText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 16,
   },
   centerContent: {
     flex: 1,

@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { registerAuthRoutes } from "./auth";
 import { createServer, type Server } from "node:http";
 import { openai, speechToText, textToSpeech, ensureCompatibleFormat, convertToWav } from "./replit_integrations/audio/client";
 import { assessPronunciation, assessWord as azureAssessWord, type AzureWordResult } from "./azure-speech";
@@ -462,6 +463,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to assess pronunciation" });
     }
   });
+
+  registerAuthRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;
