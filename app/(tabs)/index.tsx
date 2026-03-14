@@ -411,10 +411,6 @@ export default function TalkScreen() {
 
       setState("analyzing");
 
-      if (!user) {
-        setShowAuthModal(true);
-      }
-
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -422,7 +418,6 @@ export default function TalkScreen() {
 
       if (!uri) {
         setState("idle");
-        setShowAuthModal(false);
         return;
       }
 
@@ -444,9 +439,12 @@ export default function TalkScreen() {
       };
 
       pendingResultRef.current = analysisResult;
-      setShowAuthModal(false);
       setResult(analysisResult);
       setState("results");
+
+      if (!user) {
+        setTimeout(() => setShowAuthModal(true), 600);
+      }
 
       if (analysisResult.words.length > 0) {
         const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -682,7 +680,7 @@ export default function TalkScreen() {
         visible={showAuthModal}
         onDismiss={() => setShowAuthModal(false)}
         onSuccess={handleAuthSuccess}
-        scorePreview={state === "analyzing" ? undefined : result?.overallScore}
+        scorePreview={result?.overallScore}
       />
 
       <View style={styles.header}>

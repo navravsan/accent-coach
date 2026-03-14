@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
@@ -22,6 +21,13 @@ interface AuthModalProps {
   scorePreview?: number;
 }
 
+function getScoreColor(score: number) {
+  if (score >= 95) return Colors.dark.success;
+  if (score >= 85) return Colors.dark.success;
+  if (score >= 50) return Colors.dark.warning;
+  return Colors.dark.error;
+}
+
 export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview }: AuthModalProps) {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("register");
@@ -30,10 +36,27 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (!visible) {
+      setEmail("");
+      setPassword("");
+      setError("");
+      setMode("register");
+    }
+  }, [visible]);
+
   const handleSubmit = async () => {
     setError("");
-    if (!email.trim() || !password.trim()) {
-      setError("Please enter your email and password.");
+    if (!email.trim()) {
+      setError("Please enter your email.");
+      return;
+    }
+    if (!password.trim()) {
+      setError("Please enter your password.");
+      return;
+    }
+    if (mode === "register" && password.length < 6) {
+      setError("Password must be at least 6 characters.");
       return;
     }
     setLoading(true);
@@ -55,20 +78,27 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
       >
+        <Pressable style={styles.backdrop} onPress={onDismiss} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
-          {scorePreview !== undefined && (
-            <View style={styles.scoreTeaser}>
-              <Text style={styles.scoreTeaserLabel}>Your accent score is ready</Text>
-              <View style={styles.scoreBadge}>
-                <Text style={styles.scoreBadgeText}>?</Text>
+          {scorePreview !== undefined ? (
+            <View style={styles.header}>
+              <View style={[styles.scoreBadge, { borderColor: getScoreColor(scorePreview) }]}>
+                <Text style={[styles.scoreBadgeNumber, { color: getScoreColor(scorePreview) }]}>
+                  {scorePreview}
+                </Text>
+                <Text style={[styles.scoreBadgePercent, { color: getScoreColor(scorePreview) }]}>%</Text>
               </View>
-              <Text style={styles.scoreTeaserSub}>
-                Save your score and track your progress over time
-              </Text>
+              <Text style={styles.headerTitle}>Save your progress</Text>
+              <Text style={styles.headerSub}>Create a free account to track your scores over time</Text>
+            </View>
+          ) : (
+            <View style={styles.header}>
+              <Text style={styles.headerTitle}>Welcome to Accent Pro</Text>
+              <Text style={styles.headerSub}>Sign in to track your pronunciation progress</Text>
             </View>
           )}
 
@@ -99,10 +129,11 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
                 placeholder="Email"
                 placeholderTextColor={Colors.dark.textMuted}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(t) => { setEmail(t); setError(""); }}
                 autoCapitalize="none"
                 keyboardType="email-address"
                 autoCorrect={false}
+                autoComplete="email"
               />
             </View>
 
@@ -110,16 +141,20 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
               <Ionicons name="lock-closed-outline" size={18} color={Colors.dark.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Password"
+                placeholder={mode === "register" ? "Password (min 6 chars)" : "Password"}
                 placeholderTextColor={Colors.dark.textMuted}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(t) => { setPassword(t); setError(""); }}
                 secureTextEntry
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
               />
             </View>
 
             {error ? (
-              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.errorRow}>
+                <Ionicons name="alert-circle-outline" size={14} color={Colors.dark.error} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
             ) : null}
 
             <Pressable
@@ -131,14 +166,16 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.submitBtnText}>
-                  {mode === "register" ? "Create Account & See Score" : "Log In & See Score"}
+                  {mode === "register" ? "Create Account" : "Log In"}
                 </Text>
               )}
             </Pressable>
           </View>
 
           <Pressable style={styles.skipBtn} onPress={onDismiss}>
-            <Text style={styles.skipText}>Skip for now</Text>
+            <Text style={styles.skipText}>
+              {scorePreview !== undefined ? "Skip — continue without saving" : "Skip for now"}
+            </Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -150,6 +187,9 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: "flex-end",
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.6)",
   },
   sheet: {
@@ -168,30 +208,37 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 20,
   },
-  scoreTeaser: {
+  header: {
     alignItems: "center",
     marginBottom: 20,
-    gap: 8,
-  },
-  scoreTeaserLabel: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 16,
-    color: Colors.dark.text,
+    gap: 6,
   },
   scoreBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.dark.accent,
+    flexDirection: "row" as const,
+    borderWidth: 3,
+    borderRadius: 36,
+    width: 72,
+    height: 72,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 4,
   },
-  scoreBadgeText: {
+  scoreBadgeNumber: {
     fontFamily: "Inter_700Bold",
-    fontSize: 28,
-    color: "#fff",
+    fontSize: 26,
   },
-  scoreTeaserSub: {
+  scoreBadgePercent: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    marginBottom: 3,
+  },
+  headerTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 17,
+    color: Colors.dark.text,
+    textAlign: "center",
+  },
+  headerSub: {
     fontFamily: "Inter_400Regular",
     fontSize: 13,
     color: Colors.dark.textMuted,
@@ -202,7 +249,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.background,
     borderRadius: 10,
     padding: 3,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   tab: {
     flex: 1,
@@ -222,7 +269,7 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   form: {
-    gap: 12,
+    gap: 10,
   },
   inputWrapper: {
     flexDirection: "row",
@@ -243,11 +290,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.dark.text,
   },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   errorText: {
     fontFamily: "Inter_400Regular",
     fontSize: 13,
     color: Colors.dark.error,
-    textAlign: "center",
+    flex: 1,
   },
   submitBtn: {
     backgroundColor: Colors.dark.accent,
