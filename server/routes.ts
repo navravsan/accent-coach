@@ -99,6 +99,63 @@ async function extractWordAudio(
   }
 }
 
+async function gptFallbackScoring(transcript: string): Promise<{
+  overallScore: number;
+  words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>;
+}> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a pronunciation coach specializing in General American English (California accent).
+Given a transcript, evaluate each word (4+ letters) for how accurately a typical adult English learner would pronounce it.
+Assign a score (0–100) where 100 = very easy/native-like and lower = commonly mispronounced by learners.
+Only include words that are somewhat challenging (score < 95). Focus on real pronunciation difficulties.
+Also provide:
+- "phonetic": IPA transcription for General American
+- "problemPart": specific syllable/letters typically mispronounced (lowercase)
+- "tip": brief actionable tip for a Californian accent
+
+Calculate an overall score as the average of all word scores (if no challenging words found, return 88).
+Respond with ONLY valid JSON, no markdown:
+{"overallScore": 75, "words": [{"word": "example", "score": 70, "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable: ex-ZAM-ple"}]}`,
+      },
+      {
+        role: "user",
+        content: `Transcript: "${transcript}"`,
+      },
+    ],
+    max_tokens: 1500,
+    temperature: 0.3,
+  });
+
+  const raw = response.choices[0]?.message?.content || "";
+  const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  let result: any = null;
+  try {
+    result = JSON.parse(cleaned);
+  } catch {
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    if (m) try { result = JSON.parse(m[0]); } catch {}
+  }
+
+  if (!result) {
+    return { overallScore: 75, words: [] };
+  }
+
+  return {
+    overallScore: Math.round(result.overallScore ?? 75),
+    words: (result.words || []).map((w: any) => ({
+      word: w.word,
+      score: Math.round(w.score ?? 75),
+      tip: w.tip || "",
+      problemPart: w.problemPart || "",
+      phonetic: w.phonetic || "",
+    })),
+  };
+}
+
 async function enrichWordsWithTips(
   words: Array<{ word: string; score: number; errorType: string }>
 ): Promise<Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>> {
@@ -213,54 +270,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[Azure] Assessing pronunciation (${transcript.split(/\s+/).length} words, ref=${azureRef.split(/\s+/).length} words from ${referenceText ? 'matched article section' : 'transcript'})...`);
 
-      const azureResult = await assessPronunciation(wavBuffer, azureRef);
-      console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
+      let overallScore: number;
+      let wordsWithAudio: Array<any>;
+      let usedFallback = false;
 
-      const zeroWords = azureResult.words.filter(w => w.accuracyScore === 0);
-      if (zeroWords.length > 0) {
-        console.log(`[Azure] ${zeroWords.length} words with 0% score:`, zeroWords.map(w => `${w.word}(${w.errorType})`).join(", "));
-      }
+      try {
+        const azureResult = await assessPronunciation(wavBuffer, azureRef);
+        console.log(`[Azure] Overall: accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}, pron=${azureResult.pronScore}`);
 
-      const azureWords = azureResult.words
-        .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
-        .map(w => ({
-          word: w.word,
-          score: w.accuracyScore,
-          errorType: w.errorType,
+        const zeroWords = azureResult.words.filter(w => w.accuracyScore === 0);
+        if (zeroWords.length > 0) {
+          console.log(`[Azure] ${zeroWords.length} words with 0% score:`, zeroWords.map(w => `${w.word}(${w.errorType})`).join(", "));
+        }
+
+        const azureWords = azureResult.words
+          .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
+          .map(w => ({
+            word: w.word,
+            score: w.accuracyScore,
+            errorType: w.errorType,
+          }));
+
+        const enrichedWords = await enrichWordsWithTips(azureWords);
+
+        const wordsNeedingAudio = azureResult.words.filter(
+          w => w.word.length >= 4 && w.accuracyScore > 0 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
+        );
+        const audioExtractions = await Promise.all(
+          wordsNeedingAudio.map(async (w) => ({
+            word: w.word.toLowerCase(),
+            audio: await extractWordAudio(wavBuffer, w),
+          }))
+        );
+        const audioMap = new Map<string, string>();
+        for (const a of audioExtractions) {
+          if (a.audio) audioMap.set(a.word, a.audio);
+        }
+
+        wordsWithAudio = enrichedWords.map(w => ({
+          ...w,
+          userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
         }));
 
-      const enrichedWords = await enrichWordsWithTips(azureWords);
+        const scoredWords = azureResult.words.filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0);
+        overallScore = scoredWords.length > 0
+          ? Math.round(scoredWords.reduce((sum, w) => sum + w.accuracyScore, 0) / scoredWords.length)
+          : Math.round(azureResult.pronScore);
 
-      const wordsNeedingAudio = azureResult.words.filter(
-        w => w.word.length >= 4 && w.accuracyScore > 0 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion"
-      );
-      const audioExtractions = await Promise.all(
-        wordsNeedingAudio.map(async (w) => ({
-          word: w.word.toLowerCase(),
-          audio: await extractWordAudio(wavBuffer, w),
-        }))
-      );
-      const audioMap = new Map<string, string>();
-      for (const a of audioExtractions) {
-        if (a.audio) audioMap.set(a.word, a.audio);
+      } catch (azureErr: any) {
+        console.warn(`[Azure] Failed (${azureErr.message}), using GPT fallback scoring`);
+        usedFallback = true;
+        const fallback = await gptFallbackScoring(transcript);
+        overallScore = fallback.overallScore;
+        wordsWithAudio = fallback.words;
       }
 
-      const wordsWithAudio = enrichedWords.map(w => ({
-        ...w,
-        userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
-      }));
-
-      const scoredWords = azureResult.words.filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0);
-      const overallScore = scoredWords.length > 0
-        ? Math.round(scoredWords.reduce((sum, w) => sum + w.accuracyScore, 0) / scoredWords.length)
-        : Math.round(azureResult.pronScore);
-
-      console.log(`[Result] overallScore=${overallScore}, words=${wordsWithAudio.length}`);
+      console.log(`[Result] overallScore=${overallScore}, words=${wordsWithAudio.length}, fallback=${usedFallback}`);
 
       res.json({
         overallScore,
         transcript,
         words: wordsWithAudio,
+        fallback: usedFallback,
       });
     } catch (error) {
       console.error("Error analyzing speech:", error);

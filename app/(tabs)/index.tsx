@@ -47,6 +47,7 @@ interface AnalysisResult {
   overallScore: number;
   transcript: string;
   words: WordResult[];
+  fallback?: boolean;
 }
 
 type ScreenState = "idle" | "recording" | "analyzing" | "results";
@@ -439,6 +440,7 @@ export default function TalkScreen() {
         overallScore: data.overallScore || 0,
         transcript: data.transcript || "",
         words: data.words || [],
+        fallback: data.fallback || false,
       };
 
       pendingResultRef.current = analysisResult;
@@ -601,6 +603,13 @@ export default function TalkScreen() {
             <Text style={styles.sectionLabel}>What you said</Text>
             <Text style={styles.transcriptText}>{result.transcript}</Text>
           </View>
+
+          {result.fallback && (
+            <View style={styles.fallbackNotice}>
+              <Ionicons name="information-circle-outline" size={14} color={Colors.dark.textMuted} />
+              <Text style={styles.fallbackText}>AI-estimated scores — acoustic scoring unavailable</Text>
+            </View>
+          )}
 
           {redWords.length > 0 && (
             <View style={styles.wordsSection}>
@@ -1147,7 +1156,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.dark.surface,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 24,
+    marginBottom: 12,
+  },
+  fallbackNotice: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  fallbackText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: Colors.dark.textMuted,
+    fontStyle: "italic" as const,
   },
   transcriptText: {
     fontFamily: "Inter_400Regular",
