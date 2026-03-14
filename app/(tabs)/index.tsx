@@ -505,6 +505,13 @@ export default function TalkScreen() {
   const maxDuration = selectedMinutes * 60;
   const remaining = maxDuration - elapsed;
 
+  const handleAuthSuccess = useCallback(() => {
+    setShowAuthModal(false);
+    if (token) {
+      syncLocalDataToCloud(token).catch(() => {});
+    }
+  }, [token]);
+
   if (permission === null) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
@@ -656,13 +663,6 @@ export default function TalkScreen() {
       </View>
     );
   }
-
-  const handleAuthSuccess = useCallback(() => {
-    setShowAuthModal(false);
-    if (token) {
-      syncLocalDataToCloud(token).catch(() => {});
-    }
-  }, [token]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
