@@ -482,7 +482,13 @@ export default function TalkScreen() {
     } catch (err) {
       console.error("Failed to stop/analyze recording:", err);
       setState("idle");
-      Alert.alert("Error", "Failed to analyze your speech. Please try again.");
+      setShowAuthModal(false);
+      stoppingRef.current = false;
+      if (Platform.OS === "web") {
+        window.alert("Failed to analyze your speech. Please try again.");
+      } else {
+        Alert.alert("Error", "Failed to analyze your speech. Please try again.");
+      }
     }
   }, []);
 
@@ -507,10 +513,7 @@ export default function TalkScreen() {
 
   const handleAuthSuccess = useCallback(() => {
     setShowAuthModal(false);
-    if (token) {
-      syncLocalDataToCloud(token).catch(() => {});
-    }
-  }, [token]);
+  }, []);
 
   if (permission === null) {
     return (
