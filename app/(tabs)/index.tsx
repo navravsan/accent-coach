@@ -8,7 +8,9 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from "react-native";
+import Svg, { Path, Circle, G, Text as SvgText } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
@@ -28,6 +30,8 @@ import { apiRequest, getApiUrl } from "@/lib/query-client";
 import {
   addMispronouncedWords,
   addSession,
+  getSessions,
+  SessionRecord,
 } from "@/lib/accent-storage";
 import { useAuth } from "@/contexts/AuthContext";
 import AuthModal from "@/components/AuthModal";
@@ -105,6 +109,163 @@ function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight
   );
 }
 
+interface ChartPoint {
+  score: number;
+  xLabel: string;
+  annotation?: string;
+  isCurrent: boolean;
+}
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function buildChartData(sessions: SessionRecord[]): ChartPoint[] {
+  if (sessions.length === 0) return [];
+  const sorted = [...sessions].sort((a, b) => a.date - b.date);
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayMs = todayStart.getTime();
+
+  const dayMap = new Map<number, SessionRecord[]>();
+  for (const s of sorted) {
+    const d = new Date(s.date);
+    d.setHours(0, 0, 0, 0);
+    const key = d.getTime();
+    if (!dayMap.has(key)) dayMap.set(key, []);
+    dayMap.get(key)!.push(s);
+  }
+
+  const points: ChartPoint[] = [];
+  const sortedDays = Array.from(dayMap.keys()).sort((a, b) => a - b);
+
+  for (const dayKey of sortedDays) {
+    const daySessions = dayMap.get(dayKey)!;
+    const isToday = dayKey === todayMs;
+
+    if (isToday) {
+      daySessions.forEach((s, idx) => {
+        points.push({
+          score: s.overallScore,
+          xLabel: idx === 0 ? "Today" : "",
+          annotation: daySessions.length > 1 ? `${idx + 1}` : undefined,
+          isCurrent: false,
+        });
+      });
+    } else {
+      const avg = Math.round(
+        daySessions.reduce((sum, s) => sum + s.overallScore, 0) / daySessions.length
+      );
+      const d = new Date(daySessions[0].date);
+      points.push({
+        score: avg,
+        xLabel: `${MONTHS[d.getMonth()]} ${d.getDate()}`,
+        isCurrent: false,
+      });
+    }
+  }
+
+  if (points.length > 0) points[points.length - 1].isCurrent = true;
+  if (points.length > 8) return points.slice(points.length - 8);
+  return points;
+}
+
+function ProgressChart({ sessions }: { sessions: SessionRecord[] }) {
+  const data = buildChartData(sessions);
+  if (data.length < 2) return null;
+
+  const chartWidth = Dimensions.get("window").width - 48;
+  const svgH = 130;
+  const labelH = 20;
+  const pL = 12, pR = 12, pTop = 28, pBottom = 16;
+  const innerW = chartWidth - pL - pR;
+  const innerH = svgH - pTop - pBottom;
+
+  const scores = data.map((p) => p.score);
+  const minScore = Math.max(0, Math.min(...scores) - 10);
+  const maxScore = Math.min(100, Math.max(...scores) + 10);
+  const range = maxScore - minScore || 10;
+
+  const getX = (i: number) =>
+    data.length === 1
+      ? pL + innerW / 2
+      : pL + (i / (data.length - 1)) * innerW;
+  const getY = (score: number) =>
+    pTop + (1 - (score - minScore) / range) * innerH;
+
+  const pathD = data.reduce((acc, p, i) => {
+    const x = getX(i);
+    const y = getY(p.score);
+    return acc + (i === 0 ? `M${x},${y}` : ` L${x},${y}`);
+  }, "");
+
+  return (
+    <View style={chartStyles.container}>
+      <Text style={chartStyles.title}>Your Progress</Text>
+      <Svg width={chartWidth} height={svgH + labelH}>
+        <Path
+          d={pathD}
+          stroke={Colors.dark.accent}
+          strokeWidth={2}
+          fill="none"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {data.map((p, i) => {
+          const x = getX(i);
+          const y = getY(p.score);
+          const r = p.isCurrent ? 7 : 4;
+          const col = p.isCurrent ? Colors.dark.accent : Colors.dark.textSecondary;
+          return (
+            <G key={i}>
+              {p.isCurrent && (
+                <Circle cx={x} cy={y} r={14} fill={Colors.dark.accent} opacity={0.15} />
+              )}
+              <Circle cx={x} cy={y} r={r} fill={col} />
+              {p.annotation && !p.isCurrent && (
+                <SvgText x={x} y={y - r - 3} fontSize={9} textAnchor="middle" fill={Colors.dark.textMuted}>
+                  {p.annotation}
+                </SvgText>
+              )}
+              {p.isCurrent && (
+                <SvgText x={x} y={y - 16} fontSize={13} fontWeight="bold" textAnchor="middle" fill={Colors.dark.accent}>
+                  {p.score}%
+                </SvgText>
+              )}
+              {p.annotation && p.isCurrent && (
+                <SvgText x={x} y={y - 28} fontSize={9} textAnchor="middle" fill={Colors.dark.textMuted}>
+                  #{p.annotation}
+                </SvgText>
+              )}
+              {p.xLabel ? (
+                <SvgText x={x} y={svgH + 14} fontSize={10} textAnchor="middle" fill={Colors.dark.textMuted}>
+                  {p.xLabel}
+                </SvgText>
+              ) : null}
+            </G>
+          );
+        })}
+      </Svg>
+    </View>
+  );
+}
+
+const chartStyles = StyleSheet.create({
+  container: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  title: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+});
+
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
   const { user, token } = useAuth();
@@ -121,6 +282,7 @@ export default function TalkScreen() {
   const showAuthModalRef = useRef(false);
   const [lastSessionScore, setLastSessionScore] = useState<number | null>(null);
   const pendingResultRef = useRef<AnalysisResult | null>(null);
+  const [historySessions, setHistorySessions] = useState<SessionRecord[]>([]);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isTtsLoading, setIsTtsLoading] = useState(false);
@@ -166,6 +328,12 @@ export default function TalkScreen() {
       setLastSessionScore(null);
     }
   }, [user, token]);
+
+  useEffect(() => {
+    if (state === "results") {
+      getSessions().then(setHistorySessions);
+    }
+  }, [state]);
 
   const checkPermission = async () => {
     const { status } = await Audio.getPermissionsAsync();
@@ -616,17 +784,7 @@ export default function TalkScreen() {
             <Text style={styles.scoreLabel}>Overall Accent Score</Text>
           </View>
 
-          <View style={styles.transcriptBox}>
-            <Text style={styles.sectionLabel}>What you said</Text>
-            <Text style={styles.transcriptText}>{result.transcript}</Text>
-          </View>
-
-          {result.fallback && (
-            <View style={styles.fallbackNotice}>
-              <Ionicons name="information-circle-outline" size={14} color={Colors.dark.textMuted} />
-              <Text style={styles.fallbackText}>AI-estimated scores — acoustic scoring unavailable</Text>
-            </View>
-          )}
+          <ProgressChart sessions={historySessions} />
 
           {redWords.length > 0 && (
             <View style={styles.wordsSection}>
@@ -1167,32 +1325,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.dark.textSecondary,
     marginTop: 12,
-  },
-  transcriptBox: {
-    backgroundColor: Colors.dark.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  fallbackNotice: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 6,
-    marginBottom: 20,
-    paddingHorizontal: 4,
-  },
-  fallbackText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 12,
-    color: Colors.dark.textMuted,
-    fontStyle: "italic" as const,
-  },
-  transcriptText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 15,
-    color: Colors.dark.text,
-    lineHeight: 24,
-    marginTop: 8,
   },
   wordsSection: {
     marginBottom: 24,
