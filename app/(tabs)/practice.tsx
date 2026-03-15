@@ -594,7 +594,19 @@ export default function PracticeScreen() {
         },
       }));
 
-      await loadWords();
+      // Update the word's score in-place without re-sorting — position stays
+      // fixed for this session; re-ordering happens on the next visit.
+      setPracticeWords((prev) =>
+        prev.map((w) => {
+          if (w.word.toLowerCase() !== word.toLowerCase()) return w;
+          let newScores = [...w.scores, data.score];
+          if (data.score >= 90) newScores = newScores.slice(-3);
+          const newAvg = Math.round(
+            newScores.reduce((a, b) => a + b, 0) / newScores.length
+          );
+          return { ...w, scores: newScores, avgScore: newAvg };
+        })
+      );
 
       Haptics.notificationAsync(
         data.score >= 80
