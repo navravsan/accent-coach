@@ -99,38 +99,7 @@ async function extractWordAudio(
   }
 }
 
-async function gptFallbackScoring(transcript: string): Promise<{
-  overallScore: number;
-  words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>;
-}> {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: `You are a pronunciation coach specializing in General American English (California accent).
-Given a transcript, evaluate each word (4+ letters) for how accurately a typical adult English learner would pronounce it.
-Assign a score (0–100) where 100 = very easy/native-like and lower = commonly mispronounced by learners.
-Only include words that are somewhat challenging (score < 95). Focus on real pronunciation difficulties.
-Also provide:
-- "phonetic": IPA transcription for General American
-- "problemPart": specific syllable/letters typically mispronounced (lowercase)
-- "tip": brief actionable tip for a Californian accent
-
-Calculate an overall score as the average of all word scores (if no challenging words found, return 88).
-Respond with ONLY valid JSON, no markdown:
-{"overallScore": 75, "words": [{"word": "example", "score": 70, "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable: ex-ZAM-ple"}]}`,
-      },
-      {
-        role: "user",
-        content: `Transcript: "${transcript}"`,
-      },
-    ],
-    max_tokens: 1500,
-    temperature: 0.3,
-  });
-
-  const raw = response.choices[0]?.message?.content || "";
+function parseGptScoringResponse(raw: string): { overallScore: number; words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }> } | null {
   const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
   let result: any = null;
   try {
@@ -139,11 +108,7 @@ Respond with ONLY valid JSON, no markdown:
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) try { result = JSON.parse(m[0]); } catch {}
   }
-
-  if (!result) {
-    return { overallScore: 75, words: [] };
-  }
-
+  if (!result) return null;
   return {
     overallScore: Math.round(result.overallScore ?? 75),
     words: (result.words || []).map((w: any) => ({
@@ -154,6 +119,123 @@ Respond with ONLY valid JSON, no markdown:
       phonetic: w.phonetic || "",
     })),
   };
+}
+
+const CALIFORNIA_ACCENT_SYSTEM_PROMPT = `You are a professional California accent coach with phonetics expertise.
+Your job: listen to the speaker's audio and score EVERY word (4+ letters) against standard California English (General American West Coast).
+
+Scoring guide (be strict — this is a training tool):
+- 95–100: Indistinguishable from a native California speaker
+- 80–94: Very good, very minor accent feature
+- 60–79: Noticeable non-native pronunciation — flag it
+- 40–59: Clear pronunciation error — vowels, consonants, or stress wrong
+- 0–39: Significantly wrong — would confuse a native listener
+
+Key California English features to assess against:
+- The "cot-caught" merger: "lot" and "thought" share the same vowel /ɑː/
+- Non-rhotic? NO — California IS rhotic, "r" is always pronounced
+- Flat front vowels: "bad" /bæd/ with a wide open /æ/
+- T-flapping between vowels: "butter" → /ˈbʌɾər/, "city" → /ˈsɪɾi/
+- Function word reduction: "to" → /tə/, "and" → /ən/
+- Stress patterns in multi-syllable words must match General American
+- "th" sounds: voiced /ð/ in "the/this/that", voiceless /θ/ in "think/three"
+- Word-final consonants should not be dropped
+- No retroflex or dental consonants from other accent systems
+
+Flag EVERY word (4+ letters) where the speaker's pronunciation noticeably deviates.
+Include words even if the score is 70–80 — they need coaching feedback.
+
+For each flagged word provide:
+- "phonetic": IPA for the correct California pronunciation  
+- "problemPart": the exact syllable/letters the speaker got wrong (e.g. "th", "tion", "-ing")
+- "tip": one specific actionable instruction (e.g. "Place tongue behind top teeth for 'th', not between teeth")
+
+Calculate overallScore = average of ALL word scores in the transcript (not just flagged words). Be calibrated — a non-native speaker reading normally should score 55–80. Near-native: 80–90. True native: 90+.
+
+Respond ONLY with valid JSON, no markdown:
+{"overallScore": 68, "words": [{"word": "example", "score": 62, "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable and flatten the 'a': ex-ZAM-pul"}]}`;
+
+async function audioBasedAssessment(
+  wavBuffer: Buffer,
+  transcript: string,
+  referenceText: string
+): Promise<{
+  overallScore: number;
+  words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>;
+}> {
+  const audioBase64 = wavBuffer.toString("base64");
+
+  console.log(`[GPT-Audio] Assessing ${transcript.split(/\s+/).length} words with gpt-4o-audio-preview...`);
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-audio-preview",
+    messages: [
+      {
+        role: "system",
+        content: CALIFORNIA_ACCENT_SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_audio" as any,
+            input_audio: { data: audioBase64, format: "wav" },
+          },
+          {
+            type: "text",
+            text: `The speaker was reading this text aloud:\n"${referenceText || transcript}"\n\nWhisper transcription of what was said: "${transcript}"\n\nAssess their California English pronunciation.`,
+          },
+        ] as any,
+      },
+    ],
+    max_tokens: 2000,
+    temperature: 0.2,
+  });
+
+  const raw = response.choices[0]?.message?.content || "";
+  console.log(`[GPT-Audio] Raw response length: ${raw.length}`);
+  const result = parseGptScoringResponse(raw);
+
+  if (!result) {
+    throw new Error("Failed to parse GPT audio response");
+  }
+
+  console.log(`[GPT-Audio] overallScore=${result.overallScore}, words=${result.words.length}`);
+  return result;
+}
+
+async function gptTextFallbackScoring(transcript: string): Promise<{
+  overallScore: number;
+  words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>;
+}> {
+  console.log(`[GPT-Text] Falling back to text-only scoring...`);
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a California accent coach. Given only a transcript (no audio), estimate pronunciation difficulty for a non-native English speaker reading this text aloud.
+
+Score each word (4+ letters) 0–100 against California English:
+- Score based on known pronunciation challenges for non-native speakers
+- Flag words with complex consonant clusters, unusual stress, tricky vowels, "th" sounds, silent letters
+- Be realistic: most non-native speakers score 55–75 on challenging passages
+- overallScore = average of all words
+
+Provide phonetic (IPA), problemPart (specific letters), and actionable tips.
+Respond ONLY with JSON:
+{"overallScore": 68, "words": [{"word": "example", "score": 62, "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress second syllable: ex-ZAM-pul"}]}`,
+      },
+      { role: "user", content: `Transcript: "${transcript}"` },
+    ],
+    max_tokens: 1500,
+    temperature: 0.3,
+  });
+
+  const raw = response.choices[0]?.message?.content || "";
+  const result = parseGptScoringResponse(raw);
+  if (!result) return { overallScore: 70, words: [] };
+  return result;
 }
 
 async function enrichWordsWithTips(
@@ -318,11 +400,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : Math.round(azureResult.pronScore);
 
       } catch (azureErr: any) {
-        console.warn(`[Azure] Failed (${azureErr.message}), using GPT fallback scoring`);
+        console.warn(`[Azure] Failed (${azureErr.message}), using audio-based GPT assessment`);
         usedFallback = true;
-        const fallback = await gptFallbackScoring(transcript);
-        overallScore = fallback.overallScore;
-        wordsWithAudio = fallback.words;
+        try {
+          const audioResult = await audioBasedAssessment(wavBuffer, transcript, azureRef);
+          overallScore = audioResult.overallScore;
+          wordsWithAudio = audioResult.words;
+        } catch (audioErr: any) {
+          console.warn(`[GPT-Audio] Failed (${audioErr.message}), falling back to text-only scoring`);
+          const textResult = await gptTextFallbackScoring(transcript);
+          overallScore = textResult.overallScore;
+          wordsWithAudio = textResult.words;
+        }
       }
 
       console.log(`[Result] overallScore=${overallScore}, words=${wordsWithAudio.length}, fallback=${usedFallback}`);
@@ -370,39 +459,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[Azure Chunk] Assessing ${words.length} words (ref=${azureRef.split(/\s+/).length} words from ${referenceText ? 'matched article section' : 'transcript'})...`);
 
-      const azureResult = await assessPronunciation(wavBuffer, azureRef);
-      console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
+      let chunkWords: Array<any>;
 
-      const azureWords = azureResult.words
-        .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
-        .map(w => ({
-          word: w.word,
-          score: w.accuracyScore,
-          errorType: w.errorType,
+      try {
+        const azureResult = await assessPronunciation(wavBuffer, azureRef);
+        console.log(`[Azure Chunk] accuracy=${azureResult.accuracyScore}, fluency=${azureResult.fluencyScore}`);
+
+        const azureWords = azureResult.words
+          .filter(w => w.errorType !== "Omission" && w.errorType !== "Insertion" && !(w.accuracyScore === 0 && (w.offset === 0 && w.duration === 0)))
+          .map(w => ({
+            word: w.word,
+            score: w.accuracyScore,
+            errorType: w.errorType,
+          }));
+
+        const enrichedWords = await enrichWordsWithTips(azureWords);
+
+        const wordsNeedingAudio = azureResult.words.filter(
+          w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0
+        );
+        const audioExtractions = await Promise.all(
+          wordsNeedingAudio.map(async (w) => ({
+            word: w.word.toLowerCase(),
+            audio: await extractWordAudio(wavBuffer, w),
+          }))
+        );
+        const audioMap = new Map<string, string>();
+        for (const a of audioExtractions) {
+          if (a.audio) audioMap.set(a.word, a.audio);
+        }
+
+        chunkWords = enrichedWords.map(w => ({
+          ...w,
+          userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
         }));
-
-      const enrichedWords = await enrichWordsWithTips(azureWords);
-
-      const wordsNeedingAudio = azureResult.words.filter(
-        w => w.word.length >= 4 && w.accuracyScore < 85 && w.errorType !== "Omission" && w.errorType !== "Insertion" && w.accuracyScore > 0
-      );
-      const audioExtractions = await Promise.all(
-        wordsNeedingAudio.map(async (w) => ({
-          word: w.word.toLowerCase(),
-          audio: await extractWordAudio(wavBuffer, w),
-        }))
-      );
-      const audioMap = new Map<string, string>();
-      for (const a of audioExtractions) {
-        if (a.audio) audioMap.set(a.word, a.audio);
+      } catch (azureErr: any) {
+        console.warn(`[Azure Chunk] Failed (${azureErr.message}), using audio-based GPT assessment`);
+        try {
+          const audioResult = await audioBasedAssessment(wavBuffer, transcript, azureRef);
+          chunkWords = audioResult.words;
+        } catch (audioErr: any) {
+          console.warn(`[GPT-Audio Chunk] Failed (${audioErr.message}), falling back to text-only`);
+          const textResult = await gptTextFallbackScoring(transcript);
+          chunkWords = textResult.words;
+        }
       }
 
-      const wordsWithAudio = enrichedWords.map(w => ({
-        ...w,
-        userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
-      }));
-
-      res.json({ transcript, words: wordsWithAudio });
+      res.json({ transcript, words: chunkWords });
     } catch (error) {
       console.error("Error analyzing chunk:", error);
       res.status(500).json({ error: "Failed to analyze chunk" });
