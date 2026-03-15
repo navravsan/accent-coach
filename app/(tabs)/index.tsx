@@ -112,14 +112,14 @@ function WordScoreRow({ item, showHighlight }: { item: WordResult; showHighlight
 interface ChartPoint {
   score: number;
   xLabel: string;
-  annotation?: string;
   isCurrent: boolean;
 }
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function buildChartData(sessions: SessionRecord[]): ChartPoint[] {
-  if (sessions.length === 0) return [];
+  // Need at least 2 sessions for a chart to make sense
+  if (sessions.length < 2) return [];
   const sorted = [...sessions].sort((a, b) => a.date - b.date);
 
   const todayStart = new Date();
@@ -143,15 +143,16 @@ function buildChartData(sessions: SessionRecord[]): ChartPoint[] {
     const isToday = dayKey === todayMs;
 
     if (isToday) {
+      // Each session gets its own x-axis position labeled with session number
       daySessions.forEach((s, idx) => {
         points.push({
           score: s.overallScore,
-          xLabel: idx === 0 ? "Today" : "",
-          annotation: daySessions.length > 1 ? `${idx + 1}` : undefined,
+          xLabel: `${idx + 1}`,
           isCurrent: false,
         });
       });
     } else {
+      // Past day: aggregate to a single averaged point
       const avg = Math.round(
         daySessions.reduce((sum, s) => sum + s.overallScore, 0) / daySessions.length
       );
@@ -221,19 +222,9 @@ function ProgressChart({ sessions }: { sessions: SessionRecord[] }) {
                 <Circle cx={x} cy={y} r={14} fill={Colors.dark.accent} opacity={0.15} />
               )}
               <Circle cx={x} cy={y} r={r} fill={col} />
-              {p.annotation && !p.isCurrent && (
-                <SvgText x={x} y={y - r - 3} fontSize={9} textAnchor="middle" fill={Colors.dark.textMuted}>
-                  {p.annotation}
-                </SvgText>
-              )}
               {p.isCurrent && (
                 <SvgText x={x} y={y - 16} fontSize={13} fontWeight="bold" textAnchor="middle" fill={Colors.dark.accent}>
                   {p.score}%
-                </SvgText>
-              )}
-              {p.annotation && p.isCurrent && (
-                <SvgText x={x} y={y - 28} fontSize={9} textAnchor="middle" fill={Colors.dark.textMuted}>
-                  #{p.annotation}
                 </SvgText>
               )}
               {p.xLabel ? (
