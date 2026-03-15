@@ -512,25 +512,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/reading-article", async (_req: Request, res: Response) => {
+  app.get("/api/reading-article", async (req: Request, res: Response) => {
     try {
-      const topics = [
-        "agile product development",
-        "user research methods",
-        "product-market fit",
-        "sprint planning best practices",
-        "building an MVP",
-        "customer feedback loops",
-        "feature prioritization frameworks",
-        "cross-functional team collaboration",
-        "product roadmap strategies",
-        "A/B testing for product decisions",
-        "OKRs for product teams",
-        "design thinking in product management",
-        "technical debt management",
-        "stakeholder communication",
-        "growth metrics and KPIs",
-      ];
+      const category = (req.query.category as string) || "Product Management";
+
+      const topicsByCategory: Record<string, string[]> = {
+        "Product Management": [
+          "agile product development", "user research methods", "product-market fit",
+          "sprint planning best practices", "building an MVP", "customer feedback loops",
+          "feature prioritization frameworks", "cross-functional team collaboration",
+          "product roadmap strategies", "A/B testing for product decisions",
+          "OKRs for product teams", "design thinking in product management",
+          "stakeholder communication", "growth metrics and KPIs",
+        ],
+        "Software Development": [
+          "clean code principles", "system design fundamentals", "code review best practices",
+          "technical debt and how to manage it", "microservices architecture",
+          "RESTful API design", "DevOps culture and practices", "software testing strategies",
+          "continuous integration and deployment", "refactoring legacy code",
+          "database indexing and optimization", "debugging techniques for engineers",
+          "open source contribution", "pair programming benefits",
+        ],
+        "Operations": [
+          "business process improvement", "supply chain resilience", "Lean methodology in business",
+          "operational efficiency metrics", "Six Sigma principles", "team workflow automation",
+          "project management frameworks", "risk management strategies",
+          "cross-team communication", "scaling operations for growth",
+          "data-driven decision making in operations", "change management in organizations",
+          "building high-performance teams", "resource allocation and planning",
+        ],
+        "Startups": [
+          "raising your first round of funding", "building an MVP customers love",
+          "the founder mindset and resilience", "finding your first paying customers",
+          "growth hacking strategies", "when and how to pivot",
+          "startup culture and company values", "hiring the right early team members",
+          "validating your product idea", "startup metrics that matter",
+          "bootstrapping vs. venture capital", "building a co-founder relationship",
+          "product-led growth for startups", "storytelling for fundraising",
+        ],
+      };
+
+      const topics = topicsByCategory[category] || topicsByCategory["Product Management"];
       const topic = topics[Math.floor(Math.random() * topics.length)];
 
       const response = await openai.chat.completions.create({
@@ -538,7 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         messages: [
           {
             role: "system",
-            content: `Write a short, engaging article about a tech product management topic. The article should be exactly 15-20 lines long (each line being a natural sentence). Write in clear, professional English that is great for reading aloud to practice pronunciation. Use varied vocabulary with some challenging words. Do NOT use markdown formatting, bullet points, or headers. Just write flowing paragraphs. Include a one-line title at the very start.`,
+            content: `Write a short, engaging article about the given topic. The article should be exactly 15-20 sentences long. Write in clear, professional English that is great for reading aloud to practice pronunciation. Use varied vocabulary with some naturally challenging words for a non-native speaker. Do NOT use markdown formatting, bullet points, or headers — just flowing prose. Include a concise title on the very first line.`,
           },
           {
             role: "user",
@@ -554,7 +576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const title = lines[0] || topic;
       const body = lines.slice(1).join("\n");
 
-      res.json({ title, body, topic });
+      res.json({ title, body, topic, category });
     } catch (error) {
       console.error("Error generating article:", error);
       res.status(500).json({ error: "Failed to generate article" });

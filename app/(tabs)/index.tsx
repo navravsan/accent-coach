@@ -269,6 +269,8 @@ export default function TalkScreen() {
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleExpanded, setArticleExpanded] = useState(false);
   const articleRef = useRef<{ title: string; body: string } | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState("Product Management");
+  const [topicDropdownOpen, setTopicDropdownOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const showAuthModalRef = useRef(false);
   const [lastSessionScore, setLastSessionScore] = useState<number | null>(null);
@@ -336,12 +338,13 @@ export default function TalkScreen() {
     setPermission(status === "granted");
   };
 
-  const fetchArticle = async () => {
+  const fetchArticle = async (topic?: string) => {
     try {
       setArticleLoading(true);
       setArticleExpanded(false);
       const baseUrl = getApiUrl();
       const url = new URL("/api/reading-article", baseUrl);
+      url.searchParams.set("category", topic || selectedTopic);
       const resp = await globalThis.fetch(url.toString());
       if (resp.ok) {
         const data = await resp.json();
@@ -937,6 +940,48 @@ export default function TalkScreen() {
 
             {state === "idle" && (
               <View style={styles.articleSection}>
+                {/* Topic selector dropdown */}
+                <View style={styles.topicRow}>
+                  <Pressable
+                    style={({ pressed }) => [styles.topicSelector, pressed && { opacity: 0.8 }]}
+                    onPress={() => setTopicDropdownOpen(o => !o)}
+                  >
+                    <Text style={styles.topicSelectorText}>{selectedTopic}</Text>
+                    <Ionicons
+                      name={topicDropdownOpen ? "chevron-up" : "chevron-down"}
+                      size={14}
+                      color={Colors.dark.textSecondary}
+                    />
+                  </Pressable>
+                </View>
+                {topicDropdownOpen && (
+                  <View style={styles.topicDropdown}>
+                    {["Product Management", "Software Development", "Operations", "Startups"].map((t) => (
+                      <Pressable
+                        key={t}
+                        style={({ pressed }) => [
+                          styles.topicOption,
+                          selectedTopic === t && styles.topicOptionSelected,
+                          pressed && { opacity: 0.7 },
+                        ]}
+                        onPress={() => {
+                          setSelectedTopic(t);
+                          setTopicDropdownOpen(false);
+                          fetchArticle(t);
+                        }}
+                      >
+                        {selectedTopic === t && (
+                          <Ionicons name="checkmark" size={14} color={Colors.dark.accent} />
+                        )}
+                        <Text style={[
+                          styles.topicOptionText,
+                          selectedTopic === t && { color: Colors.dark.accent },
+                        ]}>{t}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
                 <View style={styles.articleHeader}>
                   <View style={styles.articleHeaderLeft}>
                     <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
@@ -1404,8 +1449,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#fff",
   },
+  topicRow: {
+    marginBottom: 10,
+  },
+  topicSelector: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    alignSelf: "flex-start" as const,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+  },
+  topicSelectorText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: Colors.dark.text,
+  },
+  topicDropdown: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.border,
+    marginBottom: 10,
+    overflow: "hidden" as const,
+  },
+  topicOption: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.dark.border,
+  },
+  topicOptionSelected: {
+    backgroundColor: Colors.dark.surfaceLight,
+  },
+  topicOptionText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 15,
+    color: Colors.dark.textSecondary,
+  },
   articleSection: {
-    marginTop: 28,
+    marginTop: 16,
   },
   articleHeader: {
     flexDirection: "row" as const,
