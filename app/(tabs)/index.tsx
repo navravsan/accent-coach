@@ -850,18 +850,6 @@ export default function TalkScreen() {
         onSuccess={handleModalClose}
       />
 
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Talk Mode</Text>
-        {user ? (
-          <View style={styles.userBadge}>
-            <Ionicons name="person-circle-outline" size={20} color={Colors.dark.accent} />
-          </View>
-        ) : (
-          <Pressable onPress={() => setShowAuthModal(true)} hitSlop={12}>
-            <Text style={styles.signInLink}>Sign In</Text>
-          </Pressable>
-        )}
-      </View>
 
       {state === "analyzing" ? (
         <View style={styles.centerContent}>
