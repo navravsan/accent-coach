@@ -118,6 +118,7 @@ export default function TalkScreen() {
   const [articleExpanded, setArticleExpanded] = useState(false);
   const articleRef = useRef<{ title: string; body: string } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const showAuthModalRef = useRef(false);
   const [lastSessionScore, setLastSessionScore] = useState<number | null>(null);
   const pendingResultRef = useRef<AnalysisResult | null>(null);
 
@@ -411,6 +412,12 @@ export default function TalkScreen() {
 
       setState("analyzing");
 
+      // Show auth sheet immediately for non-logged-in users
+      if (!user) {
+        showAuthModalRef.current = true;
+        setShowAuthModal(true);
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
@@ -418,6 +425,8 @@ export default function TalkScreen() {
 
       if (!uri) {
         setState("idle");
+        showAuthModalRef.current = false;
+        setShowAuthModal(false);
         return;
       }
 
@@ -438,14 +447,7 @@ export default function TalkScreen() {
         fallback: data.fallback || false,
       };
 
-      pendingResultRef.current = analysisResult;
-      setResult(analysisResult);
-      setState("results");
-
-      if (!user) {
-        setTimeout(() => setShowAuthModal(true), 600);
-      }
-
+      // Always save locally
       if (analysisResult.words.length > 0) {
         const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
         const sessionDate = Date.now();
@@ -478,10 +480,19 @@ export default function TalkScreen() {
         }
       }
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (showAuthModalRef.current) {
+        // Modal is still open — store result; handleModalClose will show it
+        pendingResultRef.current = analysisResult;
+      } else {
+        // Modal already dismissed (logged in user, or user skipped before analysis finished)
+        setResult(analysisResult);
+        setState("results");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     } catch (err) {
       console.error("Failed to stop/analyze recording:", err);
       setState("idle");
+      showAuthModalRef.current = false;
       setShowAuthModal(false);
       stoppingRef.current = false;
       if (Platform.OS === "web") {
@@ -511,8 +522,16 @@ export default function TalkScreen() {
   const maxDuration = selectedMinutes * 60;
   const remaining = maxDuration - elapsed;
 
-  const handleAuthSuccess = useCallback(() => {
+  const handleModalClose = useCallback(() => {
+    showAuthModalRef.current = false;
     setShowAuthModal(false);
+    const pending = pendingResultRef.current;
+    if (pending) {
+      pendingResultRef.current = null;
+      setResult(pending);
+      setState("results");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
   }, []);
 
   if (permission === null) {
@@ -678,9 +697,8 @@ export default function TalkScreen() {
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <AuthModal
         visible={showAuthModal}
-        onDismiss={() => setShowAuthModal(false)}
-        onSuccess={handleAuthSuccess}
-        scorePreview={result?.overallScore}
+        onDismiss={handleModalClose}
+        onSuccess={handleModalClose}
       />
 
       <View style={styles.header}>

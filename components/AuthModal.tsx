@@ -18,17 +18,9 @@ interface AuthModalProps {
   visible: boolean;
   onDismiss: () => void;
   onSuccess: () => void;
-  scorePreview?: number;
 }
 
-function getScoreColor(score: number) {
-  if (score >= 95) return Colors.dark.success;
-  if (score >= 85) return Colors.dark.success;
-  if (score >= 50) return Colors.dark.warning;
-  return Colors.dark.error;
-}
-
-export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview }: AuthModalProps) {
+export default function AuthModal({ visible, onDismiss, onSuccess }: AuthModalProps) {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("register");
   const [email, setEmail] = useState("");
@@ -84,23 +76,11 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
-          {scorePreview !== undefined ? (
-            <View style={styles.header}>
-              <View style={[styles.scoreBadge, { borderColor: getScoreColor(scorePreview) }]}>
-                <Text style={[styles.scoreBadgeNumber, { color: getScoreColor(scorePreview) }]}>
-                  {scorePreview}
-                </Text>
-                <Text style={[styles.scoreBadgePercent, { color: getScoreColor(scorePreview) }]}>%</Text>
-              </View>
-              <Text style={styles.headerTitle}>Save your progress</Text>
-              <Text style={styles.headerSub}>Create a free account to track your scores over time</Text>
-            </View>
-          ) : (
-            <View style={styles.header}>
-              <Text style={styles.headerTitle}>Welcome to Accent Pro</Text>
-              <Text style={styles.headerSub}>Sign in to track your pronunciation progress</Text>
-            </View>
-          )}
+          <View style={styles.header}>
+            <Ionicons name="mic" size={28} color={Colors.dark.accent} />
+            <Text style={styles.headerTitle}>Create login & see accent score</Text>
+            <Text style={styles.headerSub}>Track your pronunciation progress over time</Text>
+          </View>
 
           <View style={styles.tabs}>
             <Pressable
@@ -173,9 +153,7 @@ export default function AuthModal({ visible, onDismiss, onSuccess, scorePreview 
           </View>
 
           <Pressable style={styles.skipBtn} onPress={onDismiss}>
-            <Text style={styles.skipText}>
-              {scorePreview !== undefined ? "Skip — continue without saving" : "Skip for now"}
-            </Text>
+            <Text style={styles.skipText}>Skip for now</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -213,30 +191,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     gap: 6,
   },
-  scoreBadge: {
-    flexDirection: "row" as const,
-    borderWidth: 3,
-    borderRadius: 36,
-    width: 72,
-    height: 72,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  scoreBadgeNumber: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 26,
-  },
-  scoreBadgePercent: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 14,
-    marginBottom: 3,
-  },
   headerTitle: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    fontSize: 18,
     color: Colors.dark.text,
     textAlign: "center",
+    marginTop: 4,
   },
   headerSub: {
     fontFamily: "Inter_400Regular",
