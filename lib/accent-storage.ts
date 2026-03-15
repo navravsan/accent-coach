@@ -126,6 +126,11 @@ export async function clearAllWords(): Promise<void> {
   await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
 }
 
+export async function clearLocalData(): Promise<void> {
+  await saveMispronouncedWords([]);
+  await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
+}
+
 export async function clearLastSessionWords(): Promise<void> {
   const sessions = await getSessions();
   if (sessions.length === 0) return;

@@ -31,6 +31,7 @@ import {
   addMispronouncedWords,
   addSession,
   getSessions,
+  clearLocalData,
   SessionRecord,
 } from "@/lib/accent-storage";
 import { useAuth } from "@/contexts/AuthContext";
@@ -310,13 +311,14 @@ export default function TalkScreen() {
 
   useEffect(() => {
     if (user && token) {
+      // Only fetch cloud sessions to show the last score — no sync here.
+      // Sync happens only during registration (in handleModalClose).
       getCloudSessions(token).then((sessions) => {
         if (sessions.length > 0) {
           const sorted = [...sessions].sort((a: any, b: any) => b.date - a.date);
           setLastSessionScore(sorted[0].overallScore);
         }
       });
-      syncLocalDataToCloud(token).catch(() => {});
     } else {
       setLastSessionScore(null);
     }
@@ -684,9 +686,34 @@ export default function TalkScreen() {
   const maxDuration = selectedMinutes * 60;
   const remaining = maxDuration - elapsed;
 
-  const handleModalClose = useCallback(() => {
+  const handleModalDismiss = useCallback(() => {
+    // User skipped auth — just show the pending result, no sync.
     showAuthModalRef.current = false;
     setShowAuthModal(false);
+    const pending = pendingResultRef.current;
+    if (pending) {
+      pendingResultRef.current = null;
+      setResult(pending);
+      setState("results");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, []);
+
+  const handleModalClose = useCallback((isNewUser: boolean, tok: string) => {
+    showAuthModalRef.current = false;
+    setShowAuthModal(false);
+
+    if (isNewUser) {
+      // CID mapping: upload the anonymous session, then clear local storage
+      // so the user starts with a clean local state (cloud is source of truth).
+      syncLocalDataToCloud(tok)
+        .catch(() => {})
+        .finally(() => { clearLocalData().catch(() => {}); });
+    } else {
+      // Returning user: discard any accumulated anonymous local data.
+      clearLocalData().catch(() => {});
+    }
+
     const pending = pendingResultRef.current;
     if (pending) {
       pendingResultRef.current = null;
@@ -849,7 +876,7 @@ export default function TalkScreen() {
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <AuthModal
         visible={showAuthModal}
-        onDismiss={handleModalClose}
+        onDismiss={handleModalDismiss}
         onSuccess={handleModalClose}
       />
 
@@ -968,7 +995,7 @@ export default function TalkScreen() {
                       )}
                     </Pressable>
                     <Pressable
-                      onPress={fetchArticle}
+                      onPress={() => fetchArticle()}
                       hitSlop={12}
                       style={({ pressed }) => [pressed && { opacity: 0.6 }]}
                     >

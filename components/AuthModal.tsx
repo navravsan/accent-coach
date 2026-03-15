@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 interface AuthModalProps {
   visible: boolean;
   onDismiss: () => void;
-  onSuccess: () => void;
+  onSuccess: (isNewUser: boolean, token: string) => void;
 }
 
 export default function AuthModal({ visible, onDismiss, onSuccess }: AuthModalProps) {
@@ -53,12 +53,13 @@ export default function AuthModal({ visible, onDismiss, onSuccess }: AuthModalPr
     }
     setLoading(true);
     try {
+      let tok: string;
       if (mode === "register") {
-        await register(email.trim(), password);
+        tok = await register(email.trim(), password);
       } else {
-        await login(email.trim(), password);
+        tok = await login(email.trim(), password);
       }
-      onSuccess();
+      onSuccess(mode === "register", tok);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Try again.");
     } finally {

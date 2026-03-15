@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { getApiUrl } from "@/lib/query-client";
+import { clearLocalData } from "@/lib/accent-storage";
 
 const TOKEN_KEY = "accent_auth_token";
 
@@ -14,8 +15,8 @@ interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<string>;
+  register: (email: string, password: string) => Promise<string>;
   logout: () => Promise<void>;
 }
 
@@ -83,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<string> => {
     const res = await apiFetch("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -93,9 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await storeToken(data.token);
     setToken(data.token);
     setUser(data.user);
+    return data.token;
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
+  const register = useCallback(async (email: string, password: string): Promise<string> => {
     const res = await apiFetch("/api/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -105,10 +107,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await storeToken(data.token);
     setToken(data.token);
     setUser(data.user);
+    return data.token;
   }, []);
 
   const logout = useCallback(async () => {
     await deleteStoredToken();
+    await clearLocalData();
     setToken(null);
     setUser(null);
   }, []);

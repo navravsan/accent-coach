@@ -36,6 +36,8 @@ import {
   clearLastSessionWords,
   type MispronouncedWord,
 } from "@/lib/accent-storage";
+import { getCloudWords } from "@/lib/cloud-sync";
+import { useAuth } from "@/contexts/AuthContext";
 import { useFocusEffect } from "expo-router";
 
 const SPEECH_THRESHOLD_DBFS = -38;
@@ -261,6 +263,7 @@ function PracticeWordCard({
 
 export default function PracticeScreen() {
   const insets = useSafeAreaInsets();
+  const { user, token } = useAuth();
   const [practiceWords, setPracticeWords] = useState<PracticeWord[]>([]);
   const [loading, setLoading] = useState(true);
   const [playingWord, setPlayingWord] = useState<string | null>(null);
@@ -282,7 +285,7 @@ export default function PracticeScreen() {
     useCallback(() => {
       loadWords();
       checkPermission();
-    }, [])
+    }, [user, token])
   );
 
   const checkPermission = async () => {
@@ -292,14 +295,38 @@ export default function PracticeScreen() {
 
   const loadWords = async () => {
     setLoading(true);
-    const allWords = await getMispronouncedWords();
-    const top = getTopPracticeWords(allWords, 20);
-    const withAvg = top.map((w) => ({
-      ...w,
-      avgScore: getAverageScore(w),
-    }));
-    withAvg.sort((a, b) => a.avgScore - b.avgScore);
-    setPracticeWords(withAvg);
+    try {
+      let allWords = await getMispronouncedWords();
+
+      if (user && token) {
+        // Merge local words with cloud words — cloud is source of truth for
+        // logged-in users (local may have been cleared after auth).
+        const cloudWords = await getCloudWords(token);
+        if (cloudWords.length > 0) {
+          const wordMap = new Map<string, MispronouncedWord>(
+            allWords.map(w => [w.word.toLowerCase(), w])
+          );
+          for (const cw of cloudWords) {
+            const key = cw.word.toLowerCase();
+            const local = wordMap.get(key);
+            if (!local || cw.lastSeen > local.lastSeen) {
+              wordMap.set(key, cw);
+            }
+          }
+          allWords = Array.from(wordMap.values());
+        }
+      }
+
+      const top = getTopPracticeWords(allWords, 20);
+      const withAvg = top.map((w) => ({
+        ...w,
+        avgScore: getAverageScore(w),
+      }));
+      withAvg.sort((a, b) => a.avgScore - b.avgScore);
+      setPracticeWords(withAvg);
+    } catch {
+      setPracticeWords([]);
+    }
     setLoading(false);
   };
 

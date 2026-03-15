@@ -1,5 +1,5 @@
 import { getApiUrl } from "@/lib/query-client";
-import { getMispronouncedWords, getSessions } from "@/lib/accent-storage";
+import { getMispronouncedWords, getSessions, type MispronouncedWord } from "@/lib/accent-storage";
 
 async function authFetch(path: string, token: string, options: RequestInit = {}) {
   const baseUrl = getApiUrl();
@@ -73,6 +73,24 @@ export async function getCloudSessions(token: string) {
     if (!res.ok) return [];
     const data = await res.json();
     return data.sessions || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getCloudWords(token: string): Promise<MispronouncedWord[]> {
+  try {
+    const res = await authFetch("/api/user/words", token);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.words || []).map((w: any) => ({
+      word: w.word,
+      scores: Array.isArray(w.scores) ? w.scores : [],
+      lastSeen: w.lastSeen || Date.now(),
+      tips: Array.isArray(w.tips) ? w.tips : [],
+      problemPart: w.problemPart || "",
+      phonetic: w.phonetic || "",
+    }));
   } catch {
     return [];
   }
