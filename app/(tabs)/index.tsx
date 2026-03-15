@@ -940,48 +940,6 @@ export default function TalkScreen() {
 
             {state === "idle" && (
               <View style={styles.articleSection}>
-                {/* Topic selector dropdown */}
-                <View style={styles.topicRow}>
-                  <Pressable
-                    style={({ pressed }) => [styles.topicSelector, pressed && { opacity: 0.8 }]}
-                    onPress={() => setTopicDropdownOpen(o => !o)}
-                  >
-                    <Text style={styles.topicSelectorText}>{selectedTopic}</Text>
-                    <Ionicons
-                      name={topicDropdownOpen ? "chevron-up" : "chevron-down"}
-                      size={14}
-                      color={Colors.dark.textSecondary}
-                    />
-                  </Pressable>
-                </View>
-                {topicDropdownOpen && (
-                  <View style={styles.topicDropdown}>
-                    {["Product Management", "Software Development", "Operations", "Startups"].map((t) => (
-                      <Pressable
-                        key={t}
-                        style={({ pressed }) => [
-                          styles.topicOption,
-                          selectedTopic === t && styles.topicOptionSelected,
-                          pressed && { opacity: 0.7 },
-                        ]}
-                        onPress={() => {
-                          setSelectedTopic(t);
-                          setTopicDropdownOpen(false);
-                          fetchArticle(t);
-                        }}
-                      >
-                        {selectedTopic === t && (
-                          <Ionicons name="checkmark" size={14} color={Colors.dark.accent} />
-                        )}
-                        <Text style={[
-                          styles.topicOptionText,
-                          selectedTopic === t && { color: Colors.dark.accent },
-                        ]}>{t}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-
                 <View style={styles.articleHeader}>
                   <View style={styles.articleHeaderLeft}>
                     <Ionicons name="book-outline" size={16} color={Colors.dark.accent} />
@@ -1021,6 +979,49 @@ export default function TalkScreen() {
                       )}
                     </Pressable>
                   </View>
+                </View>
+
+                {/* Topic picker — below "Reading Practice" header */}
+                <View style={styles.topicRow}>
+                  <Text style={styles.topicLabel}>Pick your topic of interest</Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.topicSelector, pressed && { opacity: 0.8 }]}
+                    onPress={() => setTopicDropdownOpen(o => !o)}
+                  >
+                    <Text style={styles.topicSelectorText}>{selectedTopic}</Text>
+                    <Ionicons
+                      name={topicDropdownOpen ? "chevron-up" : "chevron-down"}
+                      size={14}
+                      color={Colors.dark.textSecondary}
+                    />
+                  </Pressable>
+                  {topicDropdownOpen && (
+                    <View style={styles.topicDropdown}>
+                      {["Product Management", "Software Development", "Operations", "Startups"].map((t) => (
+                        <Pressable
+                          key={t}
+                          style={({ pressed }) => [
+                            styles.topicOption,
+                            selectedTopic === t && styles.topicOptionSelected,
+                            pressed && { opacity: 0.7 },
+                          ]}
+                          onPress={() => {
+                            setSelectedTopic(t);
+                            setTopicDropdownOpen(false);
+                            fetchArticle(t);
+                          }}
+                        >
+                          {selectedTopic === t && (
+                            <Ionicons name="checkmark" size={14} color={Colors.dark.accent} />
+                          )}
+                          <Text style={[
+                            styles.topicOptionText,
+                            selectedTopic === t && { color: Colors.dark.accent },
+                          ]}>{t}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                 </View>
 
                 {article ? (
@@ -1450,7 +1451,13 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   topicRow: {
-    marginBottom: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  topicLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    color: Colors.dark.textMuted,
   },
   topicSelector: {
     flexDirection: "row" as const,
