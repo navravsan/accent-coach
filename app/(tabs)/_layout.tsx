@@ -15,8 +15,12 @@ function NativeTabLayout() {
         <Label>Talk</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="practice">
-        <Icon sf={{ default: "book", selected: "book.fill" }} />
-        <Label>Practice</Label>
+        <Icon sf={{ default: "text.word.spacing", selected: "text.word.spacing" }} />
+        <Label>Words</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="score">
+        <Icon sf={{ default: "chart.line.uptrend.xyaxis", selected: "chart.line.uptrend.xyaxis.circle.fill" }} />
+        <Label>Score</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -60,9 +64,18 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="practice"
         options={{
-          title: "Practice",
+          title: "Words",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="book" size={size} color={color} />
+            <Ionicons name="text" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="score"
+        options={{
+          title: "Score",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="bar-chart" size={size} color={color} />
           ),
         }}
       />

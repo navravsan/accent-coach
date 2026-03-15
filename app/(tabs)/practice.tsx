@@ -687,7 +687,7 @@ export default function PracticeScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + webTopInset }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Practice</Text>
+        <Text style={styles.headerTitle}>Words</Text>
         <Pressable onPress={loadWords} hitSlop={12}>
           <Ionicons name="refresh" size={24} color={Colors.dark.textSecondary} />
         </Pressable>
@@ -729,9 +729,6 @@ export default function PracticeScreen() {
 
           <Text style={styles.subtitle}>
             Top {practiceWords.length} words to improve
-          </Text>
-          <Text style={styles.instructions}>
-            Tap "Hear it" to hear correct pronunciation, then "Practice" and say the word — it stops automatically
           </Text>
 
           {practiceWords.map((word, index) => (
