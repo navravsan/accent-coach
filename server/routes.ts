@@ -155,37 +155,37 @@ Calculate overallScore = average of ALL word scores in the transcript (not just 
 Respond ONLY with valid JSON, no markdown:
 {"overallScore": 68, "words": [{"word": "example", "score": 62, "phonetic": "/ɪɡˈzæmpəl/", "problemPart": "zam", "tip": "Stress the second syllable and flatten the 'a': ex-ZAM-pul"}]}`;
 
-async function audioBasedAssessment(
-  wavBuffer: Buffer,
+async function transcriptDiffAssessment(
   transcript: string,
   referenceText: string
 ): Promise<{
   overallScore: number;
   words: Array<{ word: string; score: number; tip: string; problemPart: string; phonetic: string }>;
 }> {
-  const audioBase64 = wavBuffer.toString("base64");
-
-  console.log(`[GPT-Audio] Assessing ${transcript.split(/\s+/).length} words with gpt-4o-audio-preview...`);
+  console.log(`[Transcript-Diff] Comparing whisper transcript to reference text...`);
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-audio-preview",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
-        content: CALIFORNIA_ACCENT_SYSTEM_PROMPT,
+        content: `${CALIFORNIA_ACCENT_SYSTEM_PROMPT}
+
+ADDITIONAL CONTEXT: You cannot hear the audio directly, but you have two text sources:
+1. The text the speaker was supposed to read (reference)
+2. What OpenAI Whisper actually transcribed from their recording
+
+Whisper is an acoustic model — if it heard a word differently than expected, that strongly indicates mispronunciation. Use this signal heavily:
+- Word present in both: likely pronounced well → score 75-90 unless it's a notoriously tricky word
+- Word missing from transcript (omission): speaker skipped or garbled it → score 40-55
+- Whisper transcribed a DIFFERENT word: significant mispronunciation → score 35-60
+- Word is present but phonetically tricky for non-native speakers: still score it 60-80
+
+Overall score = weighted average of all words. Non-native speakers typically score 55-75.`,
       },
       {
         role: "user",
-        content: [
-          {
-            type: "input_audio" as any,
-            input_audio: { data: audioBase64, format: "wav" },
-          },
-          {
-            type: "text",
-            text: `The speaker was reading this text aloud:\n"${referenceText || transcript}"\n\nWhisper transcription of what was said: "${transcript}"\n\nAssess their California English pronunciation.`,
-          },
-        ] as any,
+        content: `Reference text (what the speaker was supposed to say):\n"${referenceText}"\n\nWhisper transcription (what was actually heard acoustically):\n"${transcript}"\n\nCompare them and assess California English pronunciation for each word (4+ letters) in the reference text.`,
       },
     ],
     max_tokens: 2000,
@@ -193,14 +193,14 @@ async function audioBasedAssessment(
   });
 
   const raw = response.choices[0]?.message?.content || "";
-  console.log(`[GPT-Audio] Raw response length: ${raw.length}`);
+  console.log(`[Transcript-Diff] Raw response length: ${raw.length}`);
   const result = parseGptScoringResponse(raw);
 
   if (!result) {
-    throw new Error("Failed to parse GPT audio response");
+    throw new Error("Failed to parse transcript diff response");
   }
 
-  console.log(`[GPT-Audio] overallScore=${result.overallScore}, words=${result.words.length}`);
+  console.log(`[Transcript-Diff] overallScore=${result.overallScore}, words=${result.words.length}`);
   return result;
 }
 
@@ -400,14 +400,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : Math.round(azureResult.pronScore);
 
       } catch (azureErr: any) {
-        console.warn(`[Azure] Failed (${azureErr.message}), using audio-based GPT assessment`);
+        console.warn(`[Azure] Failed (${azureErr.message}), using transcript-diff GPT assessment`);
         usedFallback = true;
         try {
-          const audioResult = await audioBasedAssessment(wavBuffer, transcript, azureRef);
-          overallScore = audioResult.overallScore;
-          wordsWithAudio = audioResult.words;
-        } catch (audioErr: any) {
-          console.warn(`[GPT-Audio] Failed (${audioErr.message}), falling back to text-only scoring`);
+          const diffResult = await transcriptDiffAssessment(transcript, azureRef);
+          overallScore = diffResult.overallScore;
+          wordsWithAudio = diffResult.words;
+        } catch (diffErr: any) {
+          console.warn(`[Transcript-Diff] Failed (${diffErr.message}), falling back to text-only scoring`);
           const textResult = await gptTextFallbackScoring(transcript);
           overallScore = textResult.overallScore;
           wordsWithAudio = textResult.words;
@@ -494,12 +494,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userAudio: audioMap.get(w.word.toLowerCase()) || undefined,
         }));
       } catch (azureErr: any) {
-        console.warn(`[Azure Chunk] Failed (${azureErr.message}), using audio-based GPT assessment`);
+        console.warn(`[Azure Chunk] Failed (${azureErr.message}), using transcript-diff GPT assessment`);
         try {
-          const audioResult = await audioBasedAssessment(wavBuffer, transcript, azureRef);
-          chunkWords = audioResult.words;
-        } catch (audioErr: any) {
-          console.warn(`[GPT-Audio Chunk] Failed (${audioErr.message}), falling back to text-only`);
+          const diffResult = await transcriptDiffAssessment(transcript, azureRef);
+          chunkWords = diffResult.words;
+        } catch (diffErr: any) {
+          console.warn(`[Transcript-Diff Chunk] Failed (${diffErr.message}), falling back to text-only`);
           const textResult = await gptTextFallbackScoring(transcript);
           chunkWords = textResult.words;
         }
@@ -588,50 +588,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawBuffer = Buffer.from(audio, "base64");
       const wavBuffer = await ensureWav16k(rawBuffer);
 
-      console.log(`[Azure Word] Assessing pronunciation of "${targetWord}"...`);
+      let score: number;
+      let feedback: string;
 
-      const azureResult = await azureAssessWord(wavBuffer, targetWord);
-      console.log(`[Azure Word] score=${azureResult.score}, errorType=${azureResult.errorType}`);
+      try {
+        console.log(`[Azure Word] Assessing pronunciation of "${targetWord}"...`);
+        const azureResult = await azureAssessWord(wavBuffer, targetWord);
+        console.log(`[Azure Word] score=${azureResult.score}, errorType=${azureResult.errorType}`);
 
-      let feedback = "";
-      if (azureResult.score < 85) {
-        try {
+        score = azureResult.score;
+
+        if (score < 85) {
           const tipResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
               {
                 role: "system",
-                content: `You are a pronunciation coach specializing in General American English — specifically the accent of a native English speaker born and raised in California, USA. Give brief, actionable feedback for improving pronunciation to sound like a native Californian speaker. Return ONLY valid JSON: {"feedback": "your tip here"}`,
+                content: `You are a California accent coach. Give brief, actionable feedback for improving pronunciation to sound like a native Californian. Return ONLY valid JSON: {"feedback": "your tip here"}`,
               },
               {
                 role: "user",
-                content: `The user tried to say "${targetWord}" and scored ${azureResult.score}/100. ${azureResult.phonemes ? `Phoneme scores: ${azureResult.phonemes.map(p => `${p.phoneme}=${p.score}`).join(", ")}` : ""}\nGive a brief tip to improve.`,
+                content: `The user said "${targetWord}" and scored ${score}/100. ${azureResult.phonemes ? `Phoneme scores: ${azureResult.phonemes.map(p => `${p.phoneme}=${p.score}`).join(", ")}` : ""}\nGive a brief coaching tip.`,
               },
             ],
             max_tokens: 128,
             temperature: 0.3,
           });
-
           const tipRaw = tipResponse.choices[0]?.message?.content || "";
           const tipCleaned = tipRaw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
           try {
             const tipData = JSON.parse(tipCleaned);
-            feedback = tipData.feedback || "";
+            feedback = tipData.feedback || "Keep practicing this word.";
           } catch {
             feedback = "Keep practicing this word.";
           }
+        } else {
+          feedback = "Great pronunciation! Sounds natural.";
+        }
+      } catch (azureErr: any) {
+        console.warn(`[Azure Word] Failed (${azureErr.message}), using Whisper + GPT fallback`);
+
+        const heard = await speechToText(wavBuffer, "wav");
+        const heardNorm = (heard || "").trim().toLowerCase().replace(/[^a-z'-]/g, "");
+        const targetNorm = targetWord.toLowerCase().replace(/[^a-z'-]/g, "");
+
+        console.log(`[Word-Fallback] target="${targetNorm}", heard="${heardNorm}"`);
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a professional California English accent coach.
+A learner attempted to say a single word. You have:
+- The target word they were supposed to say
+- What Whisper (an acoustic speech recognition model) transcribed from their recording
+
+Use the Whisper transcription as an acoustic signal:
+- Whisper heard exactly the right word: probably good pronunciation → score 75-88
+- Whisper heard something slightly different (e.g., missing final consonant, different vowel): noticeable mispronunciation → score 50-70
+- Whisper heard something very different or nothing: significant mispronunciation → score 30-55
+- Consider if the word itself has phonetic challenges for non-native speakers
+
+Give one specific coaching tip about California English pronunciation of this word.
+Respond ONLY with JSON: {"score": 72, "feedback": "Your 'th' in 'the' should use your tongue against the back of your upper teeth, not a 'd' sound"}`,
+            },
+            {
+              role: "user",
+              content: `Target word: "${targetWord}"\nWhisper heard: "${heard || "(nothing recognizable)"}"\nScore and coach them.`,
+            },
+          ],
+          max_tokens: 200,
+          temperature: 0.3,
+        });
+
+        const raw = response.choices[0]?.message?.content || "";
+        const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        try {
+          const data = JSON.parse(cleaned);
+          score = Math.round(Math.max(0, Math.min(100, data.score ?? 65)));
+          feedback = data.feedback || "Keep practicing this word.";
         } catch {
+          score = heardNorm === targetNorm ? 78 : 55;
           feedback = "Keep practicing this word.";
         }
-      } else {
-        feedback = "Great pronunciation!";
       }
 
-      res.json({
-        score: azureResult.score,
-        feedback,
-        transcript: targetWord,
-      });
+      res.json({ score, feedback, transcript: targetWord });
     } catch (error) {
       console.error("Error assessing word:", error);
       res.status(500).json({ error: "Failed to assess pronunciation" });

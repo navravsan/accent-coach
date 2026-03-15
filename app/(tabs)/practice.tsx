@@ -38,6 +38,12 @@ import {
 } from "@/lib/accent-storage";
 import { useFocusEffect } from "expo-router";
 
+const SPEECH_THRESHOLD_DBFS = -38;
+const SILENCE_THRESHOLD_DBFS = -45;
+const SILENCE_FRAMES_TO_STOP = 8;
+const VAD_POLL_MS = 100;
+const WEB_AUTO_STOP_MS = 4500;
+
 function getScoreColor(score: number): string {
   if (score >= 85) return Colors.dark.success;
   if (score >= 50) return Colors.dark.warning;
@@ -111,8 +117,8 @@ function PracticeWordCard({
     if (isRecording) {
       pulseScale.value = withRepeat(
         withSequence(
-          withTiming(1.1, { duration: 500, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.12, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 400, easing: Easing.inOut(Easing.ease) })
         ),
         -1,
         true
@@ -157,7 +163,7 @@ function PracticeWordCard({
 
         <View style={cardStyles.actions}>
           <Pressable
-            style={({ pressed }) => [cardStyles.actionBtn, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [cardStyles.labeledBtn, pressed && { opacity: 0.7 }]}
             onPress={onPlayCorrect}
             disabled={isPlayingCorrect}
           >
@@ -166,6 +172,7 @@ function PracticeWordCard({
             ) : (
               <Ionicons name="volume-high" size={22} color={Colors.dark.accent} />
             )}
+            <Text style={[cardStyles.btnLabel, { color: Colors.dark.accent }]}>Hear it</Text>
           </Pressable>
 
           {item.userAudio ? (
@@ -185,7 +192,7 @@ function PracticeWordCard({
           <Animated.View style={pulseStyle}>
             <Pressable
               style={({ pressed }) => [
-                cardStyles.actionBtn,
+                cardStyles.labeledBtn,
                 isRecording && cardStyles.recordingBtn,
                 pressed && { opacity: 0.7 },
               ]}
@@ -196,12 +203,22 @@ function PracticeWordCard({
                 size={22}
                 color={isRecording ? "#fff" : Colors.dark.accentLight}
               />
+              <Text style={[cardStyles.btnLabel, { color: isRecording ? "#fff" : Colors.dark.accentLight }]}>
+                {isRecording ? "Stop" : "Practice"}
+              </Text>
             </Pressable>
           </Animated.View>
         </View>
       </View>
 
-      {tip && (
+      {isRecording && (
+        <View style={cardStyles.listeningRow}>
+          <Ionicons name="radio-button-on" size={10} color={Colors.dark.error} />
+          <Text style={cardStyles.listeningText}>Listening… say the word</Text>
+        </View>
+      )}
+
+      {tip && !isRecording && (
         <View style={cardStyles.tipRow}>
           <MaterialCommunityIcons name="lightbulb-outline" size={14} color={Colors.dark.warning} />
           <Text style={cardStyles.tipText}>{tip}</Text>
@@ -250,11 +267,14 @@ export default function PracticeScreen() {
   const [playingOriginal, setPlayingOriginal] = useState<string | null>(null);
   const [playingRecording, setPlayingRecording] = useState<string | null>(null);
   const [recordingWord, setRecordingWord] = useState<string | null>(null);
+  const [analyzingWord, setAnalyzingWord] = useState<string | null>(null);
   const [feedbacks, setFeedbacks] = useState<Record<string, PracticeFeedback>>({});
   const [permission, setPermission] = useState<boolean | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const vadTimerRef = useRef<ReturnType<typeof setInterval> | ReturnType<typeof setTimeout> | null>(null);
+  const recordingWordRef = useRef<string | null>(null);
 
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -270,11 +290,6 @@ export default function PracticeScreen() {
     setPermission(status === "granted");
   };
 
-  const requestPermission = async () => {
-    const { status } = await Audio.requestPermissionsAsync();
-    setPermission(status === "granted");
-  };
-
   const loadWords = async () => {
     setLoading(true);
     const allWords = await getMispronouncedWords();
@@ -286,6 +301,17 @@ export default function PracticeScreen() {
     withAvg.sort((a, b) => a.avgScore - b.avgScore);
     setPracticeWords(withAvg);
     setLoading(false);
+  };
+
+  const clearVadTimer = () => {
+    if (vadTimerRef.current !== null) {
+      if (Platform.OS === "web") {
+        clearTimeout(vadTimerRef.current as ReturnType<typeof setTimeout>);
+      } else {
+        clearInterval(vadTimerRef.current as ReturnType<typeof setInterval>);
+      }
+      vadTimerRef.current = null;
+    }
   };
 
   const playWord = async (word: string) => {
@@ -409,24 +435,67 @@ export default function PracticeScreen() {
       }
 
       if (recordingRef.current) {
-        try {
-          await recordingRef.current.stopAndUnloadAsync();
-        } catch (_) {}
+        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) {}
         recordingRef.current = null;
       }
+      clearVadTimer();
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording } = await Audio.Recording.createAsync({
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
+      });
 
       recordingRef.current = recording;
+      recordingWordRef.current = word;
       setRecordingWord(word);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      if (Platform.OS !== "web") {
+        let hasSpeechStarted = false;
+        let silenceFrames = 0;
+
+        vadTimerRef.current = setInterval(async () => {
+          const rec = recordingRef.current;
+          if (!rec) { clearVadTimer(); return; }
+
+          try {
+            const status = await rec.getStatusAsync();
+            if (!status.isRecording) { clearVadTimer(); return; }
+
+            const level = (status as any).metering ?? -160;
+
+            if (!hasSpeechStarted) {
+              if (level > SPEECH_THRESHOLD_DBFS) {
+                hasSpeechStarted = true;
+                silenceFrames = 0;
+              }
+            } else {
+              if (level < SILENCE_THRESHOLD_DBFS) {
+                silenceFrames++;
+                if (silenceFrames >= SILENCE_FRAMES_TO_STOP) {
+                  clearVadTimer();
+                  const w = recordingWordRef.current;
+                  if (w) stopWordRecording(w);
+                }
+              } else {
+                silenceFrames = 0;
+              }
+            }
+          } catch (_) {
+            clearVadTimer();
+          }
+        }, VAD_POLL_MS);
+      } else {
+        vadTimerRef.current = setTimeout(() => {
+          const w = recordingWordRef.current;
+          if (w) stopWordRecording(w);
+        }, WEB_AUTO_STOP_MS);
+      }
     } catch (err) {
       console.error("Failed to start word recording:", err);
       Alert.alert("Error", "Could not start recording.");
@@ -465,17 +534,24 @@ export default function PracticeScreen() {
   };
 
   const stopWordRecording = async (word: string) => {
+    clearVadTimer();
+
     try {
       const recording = recordingRef.current;
       if (!recording) return;
 
       setRecordingWord(null);
+      recordingWordRef.current = null;
+      setAnalyzingWord(word);
 
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       recordingRef.current = null;
 
-      if (!uri) return;
+      if (!uri) {
+        setAnalyzingWord(null);
+        return;
+      }
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
@@ -519,6 +595,7 @@ export default function PracticeScreen() {
       }));
 
       await loadWords();
+
       Haptics.notificationAsync(
         data.score >= 80
           ? Haptics.NotificationFeedbackType.Success
@@ -527,6 +604,8 @@ export default function PracticeScreen() {
     } catch (err) {
       console.error("Failed to assess word:", err);
       Alert.alert("Error", "Could not assess pronunciation.");
+    } finally {
+      setAnalyzingWord(null);
     }
   };
 
@@ -534,6 +613,9 @@ export default function PracticeScreen() {
     if (recordingWord === word) {
       stopWordRecording(word);
     } else {
+      if (recordingWord) {
+        stopWordRecording(recordingWord);
+      }
       startWordRecording(word);
     }
   };
@@ -649,23 +731,32 @@ export default function PracticeScreen() {
             Top {practiceWords.length} words to improve
           </Text>
           <Text style={styles.instructions}>
-            Tap the speaker to hear correct pronunciation, the ear to hear how you said it, then the mic to practice
+            Tap "Hear it" to hear correct pronunciation, then "Practice" and say the word — it stops automatically
           </Text>
 
           {practiceWords.map((word, index) => (
             <Animated.View key={word.word} entering={FadeIn.delay(index * 50)}>
-              <PracticeWordCard
-                item={word}
-                onPlayCorrect={() => playWord(word.word)}
-                onPlayOriginal={() => playOriginalAudio(word)}
-                onPlayRecording={() => playUserRecording(word.word)}
-                onRecord={() => handleRecord(word.word)}
-                isPlayingCorrect={playingWord === word.word}
-                isPlayingOriginal={playingOriginal === word.word}
-                isPlayingRecording={playingRecording === word.word}
-                isRecording={recordingWord === word.word}
-                latestFeedback={feedbacks[word.word.toLowerCase()] || null}
-              />
+              {analyzingWord === word.word ? (
+                <View style={cardStyles.card}>
+                  <View style={cardStyles.analyzingRow}>
+                    <ActivityIndicator size="small" color={Colors.dark.accent} />
+                    <Text style={cardStyles.analyzingText}>Scoring your pronunciation…</Text>
+                  </View>
+                </View>
+              ) : (
+                <PracticeWordCard
+                  item={word}
+                  onPlayCorrect={() => playWord(word.word)}
+                  onPlayOriginal={() => playOriginalAudio(word)}
+                  onPlayRecording={() => playUserRecording(word.word)}
+                  onRecord={() => handleRecord(word.word)}
+                  isPlayingCorrect={playingWord === word.word}
+                  isPlayingOriginal={playingOriginal === word.word}
+                  isPlayingRecording={playingRecording === word.word}
+                  isRecording={recordingWord === word.word}
+                  latestFeedback={feedbacks[word.word.toLowerCase()] || null}
+                />
+              )}
             </Animated.View>
           ))}
         </ScrollView>
@@ -701,36 +792,48 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     fontSize: 13,
     color: Colors.dark.textMuted,
-    marginBottom: 20,
+    marginBottom: 16,
     lineHeight: 18,
   },
   scrollView: {
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: 24,
-    paddingTop: 4,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: "center" as const,
     alignItems: "center" as const,
-    paddingHorizontal: 48,
+    justifyContent: "center" as const,
+    paddingHorizontal: 40,
     gap: 12,
+  },
+  emptyTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 18,
+    color: Colors.dark.textSecondary,
+    textAlign: "center" as const,
+  },
+  emptyText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
+    textAlign: "center" as const,
+    lineHeight: 20,
   },
   clearRow: {
     flexDirection: "row" as const,
-    justifyContent: "flex-end" as const,
-    alignItems: "center" as const,
     gap: 12,
     marginBottom: 16,
+    flexWrap: "wrap" as const,
   },
   clearBtn: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 5,
+    gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 8,
     backgroundColor: Colors.dark.surface,
   },
@@ -738,20 +841,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     fontSize: 13,
     color: Colors.dark.error,
-  },
-  emptyTitle: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 20,
-    color: Colors.dark.text,
-    textAlign: "center" as const,
-    marginTop: 8,
-  },
-  emptyText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 15,
-    color: Colors.dark.textSecondary,
-    textAlign: "center" as const,
-    lineHeight: 22,
   },
 });
 
@@ -764,108 +853,133 @@ const cardStyles = StyleSheet.create({
   },
   topRow: {
     flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "center" as const,
+    alignItems: "flex-start" as const,
+    gap: 12,
   },
   wordInfo: {
     flex: 1,
-    gap: 6,
+    gap: 4,
   },
   wordText: {
     fontFamily: "Inter_700Bold",
-    fontSize: 20,
+    fontSize: 22,
     color: Colors.dark.text,
-    textTransform: "capitalize" as const,
+  },
+  phoneticText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: Colors.dark.textMuted,
   },
   metaRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 10,
+    gap: 8,
+    marginTop: 2,
   },
   scorePill: {
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 3,
+    borderRadius: 20,
   },
   scoreValue: {
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_700Bold",
     fontSize: 13,
   },
   freqText: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
     color: Colors.dark.textMuted,
   },
   actions: {
     flexDirection: "row" as const,
-    gap: 10,
+    alignItems: "center" as const,
+    gap: 6,
   },
   actionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: Colors.dark.surfaceLight,
-    justifyContent: "center" as const,
     alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  labeledBtn: {
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: Colors.dark.surfaceLight,
+    gap: 2,
+    minWidth: 58,
+  },
+  btnLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 10,
+    letterSpacing: 0.2,
   },
   recordingBtn: {
     backgroundColor: Colors.dark.error,
   },
-  phoneticText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 14,
+  listeningRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginTop: 10,
+  },
+  listeningText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 12,
     color: Colors.dark.textMuted,
-    marginTop: 2,
-    fontStyle: "italic" as const,
   },
   tipRow: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
     gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.dark.border,
+    marginTop: 10,
+    backgroundColor: Colors.dark.warningDim,
+    borderRadius: 8,
+    padding: 8,
   },
   tipText: {
+    flex: 1,
     fontFamily: "Inter_400Regular",
     fontSize: 13,
-    color: Colors.dark.textSecondary,
-    flex: 1,
+    color: Colors.dark.warning,
     lineHeight: 18,
   },
   feedbackContainer: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 10,
     borderTopWidth: 1,
-    borderTopColor: Colors.dark.border,
-    gap: 8,
+    borderTopColor: Colors.dark.surfaceLight,
+    paddingTop: 10,
+    gap: 6,
   },
   feedbackScoreRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    justifyContent: "space-between" as const,
+    gap: 10,
   },
   feedbackScorePill: {
-    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    borderRadius: 20,
   },
   feedbackScoreText: {
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_700Bold",
     fontSize: 13,
   },
   playMyRecBtn: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 4,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     backgroundColor: Colors.dark.surfaceLight,
   },
   playMyRecText: {
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     fontSize: 12,
     color: Colors.dark.textSecondary,
   },
@@ -874,5 +988,16 @@ const cardStyles = StyleSheet.create({
     fontSize: 13,
     color: Colors.dark.textSecondary,
     lineHeight: 18,
+  },
+  analyzingRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    paddingVertical: 8,
+  },
+  analyzingText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+    color: Colors.dark.textMuted,
   },
 });
