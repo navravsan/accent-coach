@@ -6,138 +6,58 @@ import {
   StyleSheet,
   Platform,
   Dimensions,
+  Animated,
 } from "react-native";
 import { router } from "expo-router";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withDelay,
-  withRepeat,
-  withSequence,
-  Easing,
-} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 
 const { width, height } = Dimensions.get("window");
-
-function Orb({
-  size,
-  color,
-  delay,
-  x,
-  y,
-}: {
-  size: number;
-  color: string;
-  delay: number;
-  x: number;
-  y: number;
-}) {
-  const opacity = useSharedValue(0);
-  const scale = useSharedValue(0.8);
-
-  useEffect(() => {
-    opacity.value = withDelay(
-      delay,
-      withRepeat(
-        withSequence(
-          withTiming(0.18, { duration: 2800, easing: Easing.inOut(Easing.sine) }),
-          withTiming(0.07, { duration: 2800, easing: Easing.inOut(Easing.sine) })
-        ),
-        -1,
-        true
-      )
-    );
-    scale.value = withDelay(
-      delay,
-      withRepeat(
-        withSequence(
-          withTiming(1.1, { duration: 3200, easing: Easing.inOut(Easing.sine) }),
-          withTiming(0.85, { duration: 3200, easing: Easing.inOut(Easing.sine) })
-        ),
-        -1,
-        true
-      )
-    );
-  }, []);
-
-  const style = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: color,
-          left: x - size / 2,
-          top: y - size / 2,
-        },
-        style,
-      ]}
-    />
-  );
-}
 
 export default function IntroScreen() {
   const insets = useSafeAreaInsets();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const webBottomInset = Platform.OS === "web" ? 34 : 0;
 
-  const titleOpacity = useSharedValue(0);
-  const titleY = useSharedValue(24);
-  const subtitleOpacity = useSharedValue(0);
-  const subtitleY = useSharedValue(16);
-  const btnOpacity = useSharedValue(0);
-  const btnY = useSharedValue(16);
-  const btnScale = useSharedValue(1);
+  const titleAnim = useRef(new Animated.Value(0)).current;
+  const subtitleAnim = useRef(new Animated.Value(0)).current;
+  const btnAnim = useRef(new Animated.Value(0)).current;
+  const btnScale = useRef(new Animated.Value(1)).current;
+
+  // Orb pulse
+  const orbAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    titleOpacity.value = withDelay(200, withTiming(1, { duration: 700 }));
-    titleY.value = withDelay(200, withTiming(0, { duration: 700, easing: Easing.out(Easing.cubic) }));
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(orbAnim, { toValue: 1, duration: 3000, useNativeDriver: Platform.OS !== "web" }),
+        Animated.timing(orbAnim, { toValue: 0, duration: 3000, useNativeDriver: Platform.OS !== "web" }),
+      ])
+    ).start();
 
-    subtitleOpacity.value = withDelay(600, withTiming(1, { duration: 600 }));
-    subtitleY.value = withDelay(600, withTiming(0, { duration: 600, easing: Easing.out(Easing.cubic) }));
-
-    btnOpacity.value = withDelay(1000, withTiming(1, { duration: 600 }));
-    btnY.value = withDelay(1000, withTiming(0, { duration: 600, easing: Easing.out(Easing.cubic) }));
+    Animated.stagger(350, [
+      Animated.timing(titleAnim, { toValue: 1, duration: 650, useNativeDriver: Platform.OS !== "web" }),
+      Animated.timing(subtitleAnim, { toValue: 1, duration: 600, useNativeDriver: Platform.OS !== "web" }),
+      Animated.timing(btnAnim, { toValue: 1, duration: 600, useNativeDriver: Platform.OS !== "web" }),
+    ]).start();
   }, []);
 
-  const titleStyle = useAnimatedStyle(() => ({
-    opacity: titleOpacity.value,
-    transform: [{ translateY: titleY.value }],
-  }));
-
-  const subtitleStyle = useAnimatedStyle(() => ({
-    opacity: subtitleOpacity.value,
-    transform: [{ translateY: subtitleY.value }],
-  }));
-
-  const btnContainerStyle = useAnimatedStyle(() => ({
-    opacity: btnOpacity.value,
-    transform: [{ translateY: btnY.value }],
-  }));
-
-  const btnStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: btnScale.value }],
-  }));
-
   const handleEnter = () => {
-    btnScale.value = withSequence(
-      withTiming(0.95, { duration: 80 }),
-      withTiming(1, { duration: 80 })
-    );
-    setTimeout(() => {
+    Animated.sequence([
+      Animated.timing(btnScale, { toValue: 0.95, duration: 80, useNativeDriver: Platform.OS !== "web" }),
+      Animated.timing(btnScale, { toValue: 1, duration: 80, useNativeDriver: Platform.OS !== "web" }),
+    ]).start(() => {
       router.replace("/(tabs)");
-    }, 120);
+    });
   };
+
+  const orb1Opacity = orbAnim.interpolate({ inputRange: [0, 1], outputRange: [0.07, 0.18] });
+  const orb2Opacity = orbAnim.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.06] });
+  const orb3Opacity = orbAnim.interpolate({ inputRange: [0, 1], outputRange: [0.05, 0.14] });
+
+  const titleTranslate = titleAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
+  const subtitleTranslate = subtitleAnim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
+  const btnTranslate = btnAnim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
 
   return (
     <View
@@ -150,32 +70,49 @@ export default function IntroScreen() {
       ]}
     >
       {/* Ambient orbs */}
-      <Orb size={320} color={Colors.dark.accent} delay={0} x={width * 0.15} y={height * 0.25} />
-      <Orb size={260} color="#7c5cbf" delay={800} x={width * 0.85} y={height * 0.38} />
-      <Orb size={200} color={Colors.dark.accent} delay={400} x={width * 0.5} y={height * 0.72} />
+      <Animated.View style={[styles.orb, styles.orb1, { opacity: orb1Opacity }]} />
+      <Animated.View style={[styles.orb, styles.orb2, { opacity: orb2Opacity }]} />
+      <Animated.View style={[styles.orb, styles.orb3, { opacity: orb3Opacity }]} />
 
+      {/* Main content */}
       <View style={styles.content}>
-        {/* Brand mark */}
-        <Animated.View style={[styles.brandMark, titleStyle]}>
+        <Animated.View
+          style={[
+            styles.brandMark,
+            { opacity: titleAnim, transform: [{ translateY: titleTranslate }] },
+          ]}
+        >
           <Text style={styles.logoAccent}>Go</Text>
           <Text style={styles.logoMain}>Accent</Text>
           <Text style={styles.logoDot}>.Pro</Text>
         </Animated.View>
 
-        {/* Tagline */}
-        <Animated.Text style={[styles.tagline, subtitleStyle]}>
+        <Animated.Text
+          style={[
+            styles.tagline,
+            { opacity: subtitleAnim, transform: [{ translateY: subtitleTranslate }] },
+          ]}
+        >
           Train your California accent.{"\n"}Sound like a native.
         </Animated.Text>
 
-        {/* Decorative line */}
-        <Animated.View style={[styles.dividerRow, subtitleStyle]}>
+        <Animated.View
+          style={[
+            styles.dividerRow,
+            { opacity: subtitleAnim },
+          ]}
+        >
           <View style={styles.dividerLine} />
           <View style={styles.dividerDot} />
           <View style={styles.dividerLine} />
         </Animated.View>
 
-        {/* Feature pills */}
-        <Animated.View style={[styles.pillsRow, subtitleStyle]}>
+        <Animated.View
+          style={[
+            styles.pillsRow,
+            { opacity: subtitleAnim },
+          ]}
+        >
           {["AI Scoring", "Word Practice", "Progress Tracking"].map((f) => (
             <View key={f} style={styles.pill}>
               <Text style={styles.pillText}>{f}</Text>
@@ -185,9 +122,14 @@ export default function IntroScreen() {
       </View>
 
       {/* CTA */}
-      <Animated.View style={[styles.ctaContainer, btnContainerStyle]}>
+      <Animated.View
+        style={[
+          styles.ctaContainer,
+          { opacity: btnAnim, transform: [{ translateY: btnTranslate }] },
+        ]}
+      >
         <Pressable onPress={handleEnter}>
-          <Animated.View style={[styles.enterBtn, btnStyle]}>
+          <Animated.View style={[styles.enterBtn, { transform: [{ scale: btnScale }] }]}>
             <Text style={styles.enterText}>Enter</Text>
             <Text style={styles.enterArrow}>→</Text>
           </Animated.View>
@@ -198,12 +140,41 @@ export default function IntroScreen() {
   );
 }
 
+const ORB_1 = 340;
+const ORB_2 = 280;
+const ORB_3 = 220;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.dark.background,
     justifyContent: "space-between",
     overflow: "hidden",
+  },
+  orb: {
+    position: "absolute",
+    borderRadius: 9999,
+  },
+  orb1: {
+    width: ORB_1,
+    height: ORB_1,
+    backgroundColor: Colors.dark.accent,
+    left: -ORB_1 * 0.3,
+    top: height * 0.15,
+  },
+  orb2: {
+    width: ORB_2,
+    height: ORB_2,
+    backgroundColor: "#7c5cbf",
+    right: -ORB_2 * 0.2,
+    top: height * 0.32,
+  },
+  orb3: {
+    width: ORB_3,
+    height: ORB_3,
+    backgroundColor: Colors.dark.accent,
+    left: width * 0.25,
+    bottom: height * 0.22,
   },
   content: {
     flex: 1,
