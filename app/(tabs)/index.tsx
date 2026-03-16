@@ -313,13 +313,14 @@ export default function TalkScreen() {
 
   useEffect(() => {
     if (user && token) {
-      // Only fetch cloud sessions to show the last score — no sync here.
-      // Sync happens only during registration (in handleModalClose).
-      getCloudSessions(token).then((sessions) => {
-        if (sessions.length > 0) {
-          const sorted = [...sessions].sort((a: any, b: any) => b.date - a.date);
-          setLastSessionScore(sorted[0].overallScore);
-        }
+      // Sync any remaining local data to cloud, then fetch last session score.
+      syncLocalDataToCloud(token).catch(() => {}).finally(() => {
+        getCloudSessions(token).then((sessions) => {
+          if (sessions.length > 0) {
+            const sorted = [...sessions].sort((a: any, b: any) => b.date - a.date);
+            setLastSessionScore(sorted[0].overallScore);
+          }
+        }).catch(() => {});
       });
     } else {
       setLastSessionScore(null);
@@ -705,16 +706,10 @@ export default function TalkScreen() {
     showAuthModalRef.current = false;
     setShowAuthModal(false);
 
-    if (isNewUser) {
-      // CID mapping: upload the anonymous session, then clear local storage
-      // so the user starts with a clean local state (cloud is source of truth).
-      syncLocalDataToCloud(tok)
-        .catch(() => {})
-        .finally(() => { clearLocalData().catch(() => {}); });
-    } else {
-      // Returning user: discard any accumulated anonymous local data.
-      clearLocalData().catch(() => {});
-    }
+    // Sync any local data to cloud, then clear local (cloud is source of truth).
+    syncLocalDataToCloud(tok)
+      .catch(() => {})
+      .finally(() => { clearLocalData().catch(() => {}); });
 
     const pending = pendingResultRef.current;
     if (pending) {
