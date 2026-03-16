@@ -93,7 +93,7 @@ export default function IntroScreen() {
             { opacity: subtitleAnim, transform: [{ translateY: subtitleTranslate }] },
           ]}
         >
-          Sound like a native.
+          Sound like you belong.
         </Animated.Text>
       </View>
 
