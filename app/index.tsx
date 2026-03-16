@@ -93,32 +93,8 @@ export default function IntroScreen() {
             { opacity: subtitleAnim, transform: [{ translateY: subtitleTranslate }] },
           ]}
         >
-          Train your California accent.{"\n"}Sound like a native.
+          Sound like a native.
         </Animated.Text>
-
-        <Animated.View
-          style={[
-            styles.dividerRow,
-            { opacity: subtitleAnim },
-          ]}
-        >
-          <View style={styles.dividerLine} />
-          <View style={styles.dividerDot} />
-          <View style={styles.dividerLine} />
-        </Animated.View>
-
-        <Animated.View
-          style={[
-            styles.pillsRow,
-            { opacity: subtitleAnim },
-          ]}
-        >
-          {["AI Scoring", "Word Practice", "Progress Tracking"].map((f) => (
-            <View key={f} style={styles.pill}>
-              <Text style={styles.pillText}>{f}</Text>
-            </View>
-          ))}
-        </Animated.View>
       </View>
 
       {/* CTA */}
@@ -213,44 +189,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 28,
     marginBottom: 36,
-  },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 28,
-    width: "60%",
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.dark.border,
-  },
-  dividerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: Colors.dark.accent,
-    opacity: 0.6,
-  },
-  pillsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 8,
-  },
-  pill: {
-    backgroundColor: Colors.dark.surface,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderWidth: 1,
-    borderColor: Colors.dark.border,
-  },
-  pillText: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 13,
-    color: Colors.dark.textMuted,
   },
   ctaContainer: {
     paddingHorizontal: 32,
