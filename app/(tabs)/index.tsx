@@ -614,20 +614,30 @@ export default function TalkScreen() {
         fallback: data.fallback || false,
       };
 
-      // Always save locally
+      // Always save the session
+      const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const sessionDate = Date.now();
+      await addSession({
+        id: sessionId,
+        date: sessionDate,
+        overallScore: analysisResult.overallScore,
+        wordCount: analysisResult.words.length,
+      });
       if (analysisResult.words.length > 0) {
-        const sessionId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        const sessionDate = Date.now();
         await addMispronouncedWords(analysisResult.words);
-        await addSession({
+      }
+
+      const currentToken = authRef.current.token;
+      if (currentToken) {
+        saveSessionToCloud(currentToken, {
           id: sessionId,
           date: sessionDate,
           overallScore: analysisResult.overallScore,
           wordCount: analysisResult.words.length,
-        });
-
-        const currentToken = authRef.current.token;
-        if (currentToken) {
+        }).then(() => {
+          setLastSessionScore(analysisResult.overallScore);
+        }).catch(() => {});
+        if (analysisResult.words.length > 0) {
           saveWordsToCloud(currentToken, analysisResult.words.map(w => ({
             word: w.word,
             scores: [w.score],
@@ -636,14 +646,6 @@ export default function TalkScreen() {
             problemPart: w.problemPart,
             phonetic: w.phonetic,
           }))).catch(() => {});
-          saveSessionToCloud(currentToken, {
-            id: sessionId,
-            date: sessionDate,
-            overallScore: analysisResult.overallScore,
-            wordCount: analysisResult.words.length,
-          }).then(() => {
-            setLastSessionScore(analysisResult.overallScore);
-          }).catch(() => {});
         }
       }
 

@@ -166,6 +166,7 @@ async function transcriptDiffAssessment(
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
@@ -181,11 +182,12 @@ Whisper is an acoustic model — if it heard a word differently than expected, t
 - Whisper transcribed a DIFFERENT word: significant mispronunciation → score 35-60
 - Word is present but phonetically tricky for non-native speakers: still score it 60-80
 
-Overall score = weighted average of all words. Non-native speakers typically score 55-75.`,
+Overall score = weighted average of all words. Non-native speakers typically score 55-75.
+You MUST score every word (4+ letters) from the reference text — the words array must never be empty.`,
       },
       {
         role: "user",
-        content: `Reference text (what the speaker was supposed to say):\n"${referenceText}"\n\nWhisper transcription (what was actually heard acoustically):\n"${transcript}"\n\nCompare them and assess California English pronunciation for each word (4+ letters) in the reference text.`,
+        content: `Reference text (what the speaker was supposed to say):\n"${referenceText}"\n\nWhisper transcription (what was actually heard acoustically):\n"${transcript}"\n\nCompare them and assess California English pronunciation for each word (4+ letters) in the reference text. Return ALL words scored, not just problem words.`,
       },
     ],
     max_tokens: 2000,
@@ -406,6 +408,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const diffResult = await transcriptDiffAssessment(transcript, azureRef);
           overallScore = diffResult.overallScore;
           wordsWithAudio = diffResult.words;
+          // If GPT returned no words, force text-only fallback
+          if (wordsWithAudio.length === 0) {
+            console.warn(`[Transcript-Diff] Returned 0 words, forcing text fallback`);
+            const textResult = await gptTextFallbackScoring(transcript);
+            wordsWithAudio = textResult.words;
+            if (textResult.overallScore > 0) overallScore = textResult.overallScore;
+          }
         } catch (diffErr: any) {
           console.warn(`[Transcript-Diff] Failed (${diffErr.message}), falling back to text-only scoring`);
           const textResult = await gptTextFallbackScoring(transcript);
