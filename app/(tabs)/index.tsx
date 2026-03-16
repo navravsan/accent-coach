@@ -260,7 +260,9 @@ const chartStyles = StyleSheet.create({
 
 export default function TalkScreen() {
   const insets = useSafeAreaInsets();
-  const { user, token } = useAuth();
+  const { user, token, isLoading: authLoading } = useAuth();
+  const authRef = useRef({ user, token, authLoading });
+  useEffect(() => { authRef.current = { user, token, authLoading }; }, [user, token, authLoading]);
   const [state, setState] = useState<ScreenState>("idle");
   const selectedMinutes = 1;
   const [elapsed, setElapsed] = useState(0);
@@ -576,8 +578,8 @@ export default function TalkScreen() {
 
       setState("analyzing");
 
-      // Show auth sheet immediately for non-logged-in users
-      if (!user) {
+      // Show auth sheet only if auth has finished loading and user is not logged in
+      if (!authRef.current.authLoading && !authRef.current.user) {
         showAuthModalRef.current = true;
         setShowAuthModal(true);
       }
@@ -623,7 +625,7 @@ export default function TalkScreen() {
           wordCount: analysisResult.words.length,
         });
 
-        const currentToken = token;
+        const currentToken = authRef.current.token;
         if (currentToken) {
           saveWordsToCloud(currentToken, analysisResult.words.map(w => ({
             word: w.word,
