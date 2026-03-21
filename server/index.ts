@@ -225,6 +225,12 @@ function setupErrorHandler(app: express.Application) {
 }
 
 (async () => {
+  // Startup env check
+  const requiredEnvVars = ["DATABASE_URL", "OPENAI_API_KEY", "AZURE_SPEECH_KEY", "SESSION_SECRET"];
+  for (const v of requiredEnvVars) {
+    log(`ENV ${v}: ${process.env[v] ? "SET" : "MISSING"}`);
+  }
+
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);

@@ -1,8 +1,8 @@
-[phases.setup]
-aptPkgs = ["ffmpeg"]
-
 [phases.install]
-cmds = ["npm install --frozen-lockfile"]
+cmds = [
+  "apt-get update && apt-get install -y ffmpeg",
+  "npm install --frozen-lockfile"
+]
 
 [start]
 cmd = "npm run server:prod"
