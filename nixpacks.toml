@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install --frozen-lockfile"]
+
+[phases.build]
+cmds = ["npm run expo:static:build && npm run server:build"]
+
+[start]
+cmd = "npm run server:prod"
