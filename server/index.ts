@@ -27,6 +27,14 @@ function setupCors(app: express.Application) {
       });
     }
 
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+      origins.add(`https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+    }
+
+    if (process.env.EXPO_PUBLIC_DOMAIN) {
+      origins.add(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+    }
+
     const origin = req.header("origin");
 
     // Allow localhost origins for Expo web development (any port)
