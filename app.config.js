@@ -1,8 +1,6 @@
 const domain =
   process.env.EXPO_PUBLIC_DOMAIN ||
-  process.env.RAILWAY_PUBLIC_DOMAIN ||
-  process.env.REPLIT_INTERNAL_APP_DOMAIN ||
-  process.env.REPLIT_DEV_DOMAIN;
+  process.env.RAILWAY_PUBLIC_DOMAIN;
 
 const origin = domain ? `https://${domain}/` : "https://localhost:8081/";
 

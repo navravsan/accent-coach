@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { registerAuthRoutes } from "./auth";
 import { createServer, type Server } from "node:http";
-import { openai, speechToText, textToSpeech, ensureCompatibleFormat, convertToWav } from "./replit_integrations/audio/client";
+import { openai, speechToText, textToSpeech, ensureCompatibleFormat, convertToWav } from "./audio";
 import { assessPronunciation, assessWord as azureAssessWord, type AzureWordResult } from "./azure-speech";
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
