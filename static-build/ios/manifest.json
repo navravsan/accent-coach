@@ -1,18 +1,18 @@
 {
-  "id": "611382e8-c6a8-40d4-91ea-ba497320fb20",
-  "createdAt": "2026-03-21T18:21:22.920Z",
+  "id": "00927bec-50ec-4f1e-b693-3af303bc8c42",
+  "createdAt": "2026-03-21T19:10:31.588Z",
   "runtimeVersion": "exposdk:54.0.0",
   "launchAsset": {
-    "key": "bundle-1774117282920-12033",
+    "key": "bundle-1774120231588-14540",
     "contentType": "application/javascript",
-    "url": "https://www.goaccent.pro/1774117282920-12033/_expo/static/js/ios/bundle.js"
+    "url": "https://www.goaccent.pro/1774120231588-14540/_expo/static/js/ios/bundle.js"
   },
   "assets": [],
   "metadata": {},
   "extra": {
     "eas": {},
     "expoClient": {
-      "name": "Accent Pro",
+      "name": "GoAccent Pro",
       "slug": "accent-pro",
       "version": "1.0.0",
       "orientation": "portrait",

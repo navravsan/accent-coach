@@ -6,7 +6,7 @@ const origin = domain ? `https://${domain}/` : "https://localhost:8081/";
 
 module.exports = {
   expo: {
-    name: "Accent Pro",
+    name: "GoAccent Pro",
     slug: "accent-pro",
     version: "1.0.0",
     orientation: "portrait",
